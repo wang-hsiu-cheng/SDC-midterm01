@@ -10,55 +10,41 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 def generate_launch_description():
     pkg_share = get_package_share_directory('localization')
+    default_params_file = os.path.join(pkg_share, 'config', 'localization_params.yaml')
     arguments = [
-        DeclareLaunchArgument('data_path', default_value='/root/data/Track1', description='Track directory containing map.pcd and init_guess.txt'),
-        DeclareLaunchArgument("bag_path", default_value="", description="Optional .db3 file or bag directory for GNSS and IMU messages"),
+        DeclareLaunchArgument('data_path', default_value='/root/data/Track1', description='Track directory'),
+        DeclareLaunchArgument('bag_path', default_value='', description='Optional .db3 bag'),
         DeclareLaunchArgument('ply_path', default_value=PathJoinSubstitution([LaunchConfiguration('data_path'), 'raw_ply'])),
         DeclareLaunchArgument('init_guess_file', default_value=PathJoinSubstitution([LaunchConfiguration('data_path'), 'init_guess.txt'])),
 
         DeclareLaunchArgument('save_path', default_value='/root/midterm/src/localization/result/'),
         DeclareLaunchArgument('save_file', default_value='Track1_result.txt'),
-        
+
+        DeclareLaunchArgument('params_file', default_value=default_params_file, description='Path to yaml parameters file'),
         DeclareLaunchArgument('log_level', default_value='info'),
-    ]
-    parameter_types = {
-        'map_voxel_leaf_size': float, 'input_voxel_leaf_size': float,
-        'min_input_points': int, 'submap_half_size': float, 'submap_half_height': float,
-        'ndt_resolution': float, 'ndt_step_size': float,
-        'ndt_transformation_epsilon': float, 'ndt_max_iterations': int,
-        'ply_scale': float, 'publish_global_map': bool,
-        'max_frames': int, 'keep_alive': bool,
-    }
-    arguments += [
-        DeclareLaunchArgument(name, default_value='', description='Optional override; omitted uses localization.h default')
-        for name in parameter_types
     ]
 
     def create_nodes(context):
-        # Pass only explicit terminal overrides; let the C++ node own defaults.
-        overrides = {
-            name: ParameterValue(LaunchConfiguration(name), value_type=value_type)
-            for name, value_type in parameter_types.items()
-            if LaunchConfiguration(name).perform(context).strip()
-        }
+        params_file_path = LaunchConfiguration('params_file').perform(context)
+
         localization_node = Node(
             package='localization', executable='localization',
             name='image_point_cloud_localizer', output='screen',
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
-            parameters=[{
-                'use_sim_time': False,
-                'map_path': LaunchConfiguration('data_path'),
-                'map_file': 'map.pcd',
-                'map_cache_file': 'map_downsampled_1m.pcd',
-                'bag_path': LaunchConfiguration('bag_path'),
-                'ply_path': LaunchConfiguration('ply_path'),
-                'init_guess_file': LaunchConfiguration('init_guess_file'),
-                
-                'save_path': LaunchConfiguration('save_path'),
-                'save_file': LaunchConfiguration('save_file'),
-
-                **overrides,
-            }],
+            parameters=[
+                params_file_path,  # 載入 YAML 完整超參數
+                {
+                    'use_sim_time': False,
+                    'map_path': LaunchConfiguration('data_path'),
+                    'map_file': 'map.pcd',
+                    'map_cache_file': 'map_downsampled_1m.pcd',
+                    'bag_path': LaunchConfiguration('bag_path'),
+                    'ply_path': LaunchConfiguration('ply_path'),
+                    'init_guess_file': LaunchConfiguration('init_guess_file'),
+                    'save_path': LaunchConfiguration('save_path'),
+                    'save_file': LaunchConfiguration('save_file'),
+                }
+            ],
         )
         rviz_node = Node(
             package='rviz2', executable='rviz2', name='display_result', output='screen',

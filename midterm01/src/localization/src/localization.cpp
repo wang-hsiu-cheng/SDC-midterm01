@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <cstdint>
 #include <limits>
 #include <sstream>
 
@@ -19,7 +18,6 @@
 #include <pcl/conversions.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/io/ply_io.h>
-#include <pcl/registration/ndt.h>
 #include <pcl_conversions/pcl_conversions.h>
 
 #include <tf2/LinearMath/Matrix3x3.h>
@@ -72,6 +70,7 @@ int LocalizationApp::Start(int argc, char** argv) {
 // ** ================ Data loading & Parameter setting ================ **
 // ** ================================================================== **
 bool LocalizationApp::LoadParameters() {
+    // 1. I/O 與系統參數宣告
     node_->declare_parameter<std::string>("map_path", "");
     node_->declare_parameter<std::string>("map_file", "map.pcd");
     node_->declare_parameter<std::string>("map_cache_file", "");
@@ -87,19 +86,34 @@ bool LocalizationApp::LoadParameters() {
     node_->declare_parameter<double>("submap_half_size", submap_half_size_);
     node_->declare_parameter<double>("submap_half_height", submap_half_height_);
     node_->declare_parameter<int>("min_input_points", min_input_points_);
-    
-
-    node_->declare_parameter<double>("ndt_resolution", ndt_resolution_);
-    node_->declare_parameter<double>("ndt_step_size", ndt_step_size_);
-    node_->declare_parameter<double>("ndt_transformation_epsilon", ndt_transformation_epsilon_);
-    node_->declare_parameter<int>("ndt_max_iterations", ndt_max_iterations_);
     node_->declare_parameter<double>("ply_scale", ply_scale_);
-
+    
     node_->declare_parameter<bool>("keep_alive", keep_alive_);
     node_->declare_parameter<bool>("publish_global_map", publish_global_map_);
     node_->declare_parameter<int>("max_frames", max_frames_);
 
 
+    // 2. Coarse-to-Fine G-ICP 參數宣告
+    CoarseToFineConfig gicp_cfg;
+    node_->declare_parameter<double>("coarse_voxel_size", gicp_cfg.coarse.voxel_size);
+    node_->declare_parameter<double>("coarse_max_corr_dist", gicp_cfg.coarse.max_correspondence_distance);
+    node_->declare_parameter<int>("coarse_max_iterations", gicp_cfg.coarse.max_iterations);
+    node_->declare_parameter<double>("fine_voxel_size", gicp_cfg.fine.voxel_size);
+    node_->declare_parameter<double>("fine_max_corr_dist", gicp_cfg.fine.max_correspondence_distance);
+    node_->declare_parameter<int>("fine_max_iterations", gicp_cfg.fine.max_iterations);
+    node_->declare_parameter<double>("gicp_transformation_epsilon", gicp_cfg.transformation_epsilon);
+    node_->declare_parameter<double>("gicp_rotation_epsilon", gicp_cfg.rotation_epsilon);
+    node_->declare_parameter<double>("gicp_max_fitness_score", gicp_cfg.max_acceptable_score);
+
+    // 3. Motion Predictor 參數宣告
+    MotionPredictorConfig mp_cfg;
+    node_->declare_parameter<bool>("enable_motion_prior", mp_cfg.enable_motion_prior);
+    node_->declare_parameter<double>("max_linear_velocity", mp_cfg.max_linear_velocity);
+    node_->declare_parameter<double>("max_angular_velocity", mp_cfg.max_angular_velocity);
+    node_->declare_parameter<double>("motion_prior_weight", mp_cfg.motion_prior_weight);
+    node_->declare_parameter<double>("outlier_threshold_dist", mp_cfg.outlier_threshold_dist);
+
+    // 讀取參數
     map_path_ = node_->get_parameter("map_path").as_string();
     map_file_ = node_->get_parameter("map_file").as_string();
     map_cache_file_ = node_->get_parameter("map_cache_file").as_string();
@@ -115,33 +129,34 @@ bool LocalizationApp::LoadParameters() {
     submap_half_size_ = node_->get_parameter("submap_half_size").as_double();
     submap_half_height_ = node_->get_parameter("submap_half_height").as_double();
     min_input_points_ = node_->get_parameter("min_input_points").as_int();
-    ndt_max_iterations_ = node_->get_parameter("ndt_max_iterations").as_int();
-
-    ndt_resolution_ = node_->get_parameter("ndt_resolution").as_double();
-    ndt_step_size_ = node_->get_parameter("ndt_step_size").as_double();
-    ndt_transformation_epsilon_ = node_->get_parameter("ndt_transformation_epsilon").as_double();
     ply_scale_ = node_->get_parameter("ply_scale").as_double();
-
+    
     keep_alive_ = node_->get_parameter("keep_alive").as_bool();
     publish_global_map_ = node_->get_parameter("publish_global_map").as_bool();
     max_frames_ = node_->get_parameter("max_frames").as_int();
 
+    // 建構 CoarseToFineGICP 執行個體
+    gicp_cfg.coarse.voxel_size = node_->get_parameter("coarse_voxel_size").as_double();
+    gicp_cfg.coarse.max_correspondence_distance = node_->get_parameter("coarse_max_corr_dist").as_double();
+    gicp_cfg.coarse.max_iterations = node_->get_parameter("coarse_max_iterations").as_int();
+    gicp_cfg.fine.voxel_size = node_->get_parameter("fine_voxel_size").as_double();
+    gicp_cfg.fine.max_correspondence_distance = node_->get_parameter("fine_max_corr_dist").as_double();
+    gicp_cfg.fine.max_iterations = node_->get_parameter("fine_max_iterations").as_int();
+    gicp_cfg.transformation_epsilon = node_->get_parameter("gicp_transformation_epsilon").as_double();
+    gicp_cfg.rotation_epsilon = node_->get_parameter("gicp_rotation_epsilon").as_double();
+    gicp_cfg.max_acceptable_score = node_->get_parameter("gicp_max_fitness_score").as_double();
+    gicp_matcher_ = std::make_unique<CoarseToFineGICP>(gicp_cfg);
+
+    // 建構 MotionPredictor 執行個體
+    mp_cfg.enable_motion_prior = node_->get_parameter("enable_motion_prior").as_bool();
+    mp_cfg.max_linear_velocity = node_->get_parameter("max_linear_velocity").as_double();
+    mp_cfg.max_angular_velocity = node_->get_parameter("max_angular_velocity").as_double();
+    mp_cfg.motion_prior_weight = node_->get_parameter("motion_prior_weight").as_double();
+    mp_cfg.outlier_threshold_dist = node_->get_parameter("outlier_threshold_dist").as_double();
+    motion_predictor_ = std::make_unique<MotionPredictor>(mp_cfg);
 
     if (ply_path_.empty() || map_path_.empty() || save_path_.empty() || save_file_.empty()) {
         RCLCPP_ERROR(node_->get_logger(), "PLY, map and output paths are required.");
-        return false;
-    }
-    if (init_guess_file_.empty() &&
-        (initial_pose_.size() != 4 || !std::all_of(initial_pose_.begin(), initial_pose_.end(), [](double value) { return std::isfinite(value); }))) {
-        RCLCPP_ERROR(node_->get_logger(), "initial_pose must contain finite [x, y, z, yaw].");
-        return false;
-    }
-    const std::vector<double> positive = {ply_scale_, submap_half_size_, submap_half_height_, ndt_resolution_, ndt_step_size_, ndt_transformation_epsilon_};
-    if (!std::all_of(positive.begin(), positive.end(), [](double value) { return std::isfinite(value) && value > 0.0; }) ||
-        !std::isfinite(map_voxel_leaf_size_) || map_voxel_leaf_size_ < 0.0 ||
-        !std::isfinite(input_voxel_leaf_size_) || input_voxel_leaf_size_ < 0.0 ||
-        max_frames_ < 0 || min_input_points_ < 1 || ndt_max_iterations_ < 1) {
-        RCLCPP_ERROR(node_->get_logger(), "Invalid filtering or NDT parameters.");
         return false;
     }
     boost::filesystem::create_directories(save_path_);
@@ -175,7 +190,6 @@ bool LocalizationApp::LoadMap() {
     }
 
     if (!has_cache && map_voxel_leaf_size_ > 0.0) {
-        const std::size_t original_size = map_cloud_->size();
         auto filtered = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
         pcl::VoxelGrid<pcl::PointXYZ> voxel;
         voxel.setInputCloud(map_cloud_);
@@ -183,17 +197,6 @@ bool LocalizationApp::LoadMap() {
         voxel.setLeafSize(leaf, leaf, leaf);
         voxel.filter(*filtered);
         map_cloud_ = filtered;
-        RCLCPP_INFO(node_->get_logger(), "Downsampled map from %zu to %zu points (leaf %.2f m).", original_size, map_cloud_->size(), map_voxel_leaf_size_);
-
-        if (!cache_path.empty()) {
-            if (pcl::io::savePCDFileBinary(cache_path.string(), *map_cloud_) == 0) {
-                RCLCPP_INFO(node_->get_logger(), "Saved map cache: %s", cache_path.string().c_str());
-            } else {
-                RCLCPP_WARN(node_->get_logger(), "Failed to save map cache: %s", cache_path.string().c_str());
-            }
-        }
-    } else {
-        RCLCPP_INFO(node_->get_logger(), "Loaded %zu map points%s.", map_cloud_->size(), has_cache ? " from cache" : "");
     }
     return !map_cloud_->empty();
 }
@@ -213,17 +216,6 @@ bool LocalizationApp::OpenDB3File() {
             converter.input_serialization_format = "cdr";
             converter.output_serialization_format = "cdr";
             bag_reader_->open(options, converter);
-            const auto topics = bag_reader_->get_all_topics_and_types();
-            const auto topic = std::find_if(topics.begin(), topics.end(), [&](const auto& item) { return item.name == gnss_topic; });
-            if (topic == topics.end() || topic->type != "geometry_msgs/msg/PoseStamped") {
-                RCLCPP_ERROR(node_->get_logger(), "GNSS topic '%s' must exist with type geometry_msgs/msg/PoseStamped.", gnss_topic.c_str());
-                return false;
-            }
-            const auto imu = std::find_if(topics.begin(), topics.end(), [&](const auto& item) { return item.name == imu_topic; });
-            if (imu == topics.end() || imu->type != "sensor_msgs/msg/Imu") {
-                RCLCPP_ERROR(node_->get_logger(), "IMU topic '%s' must exist with type sensor_msgs/msg/Imu.", imu_topic.c_str());
-                return false;
-            }
             rosbag2_storage::StorageFilter filter;
             filter.topics = {gnss_topic, imu_topic};
             bag_reader_->set_filter(filter);
@@ -233,7 +225,7 @@ bool LocalizationApp::OpenDB3File() {
             return false;
         }
     }
-
+    
     return true;
 }
 
@@ -242,18 +234,14 @@ bool LocalizationApp::LoadDB3Frame(std::int64_t timestamp_ns, DB3Frame& frame) {
     const std::string imu_topic = "/imu/data";
     rclcpp::Serialization<geometry_msgs::msg::PoseStamped> gnss_serialization;
     rclcpp::Serialization<sensor_msgs::msg::Imu> imu_serialization;
-    // Compare exact integer bag timestamps against the PLY filename ROS ns.
-    // Consume both information streams up to this frame, without future measurements.
     try {
         while (next_db3_message_ && next_db3_message_->time_stamp <= timestamp_ns) {
             rclcpp::SerializedMessage serialized(*next_db3_message_->serialized_data);
             if (next_db3_message_->topic_name == gnss_topic) {
                 gnss_serialization.deserialize_message(&serialized, &frame.gnss_pose);
-                frame.gnss_bag_timestamp_ns = next_db3_message_->time_stamp;
                 frame.has_gnss_pose = true;
             } else if (next_db3_message_->topic_name == imu_topic) {
                 imu_serialization.deserialize_message(&serialized, &frame.imu_data);
-                frame.imu_bag_timestamp_ns = next_db3_message_->time_stamp;
                 frame.has_imu_data = true;
             }
             next_db3_message_ = bag_reader_->has_next() ? bag_reader_->read_next() : nullptr;
@@ -261,17 +249,6 @@ bool LocalizationApp::LoadDB3Frame(std::int64_t timestamp_ns, DB3Frame& frame) {
     } catch (const std::exception& error) {
         RCLCPP_ERROR(node_->get_logger(), "Failed to read sensor message: %s", error.what());
         return false;
-    }
-    if (frame.has_gnss_pose) {
-        RCLCPP_DEBUG(node_->get_logger(), "GNSS bag_time=%lld, frame_id=%s, position=(%.3f, %.3f, %.3f)",
-                     static_cast<long long>(frame.gnss_bag_timestamp_ns), frame.gnss_pose.header.frame_id.c_str(),
-                     frame.gnss_pose.pose.position.x, frame.gnss_pose.pose.position.y, frame.gnss_pose.pose.position.z);
-    }
-    if (frame.has_imu_data) {
-        RCLCPP_DEBUG(node_->get_logger(), "IMU bag_time=%lld, angular_velocity=(%.6f, %.6f, %.6f), linear_acceleration=(%.6f, %.6f, %.6f)",
-                     static_cast<long long>(frame.imu_bag_timestamp_ns),
-                     frame.imu_data.angular_velocity.x, frame.imu_data.angular_velocity.y, frame.imu_data.angular_velocity.z,
-                     frame.imu_data.linear_acceleration.x, frame.imu_data.linear_acceleration.y, frame.imu_data.linear_acceleration.z);
     }
     return true;
 }
@@ -300,7 +277,7 @@ bool LocalizationApp::IndexPlyFiles(const std::string& directory_path) {
     }
     std::sort(ply_frames_.begin(), ply_frames_.end(), [](const PlyFrameInfo& lhs, const PlyFrameInfo& rhs) 
               {return lhs.timestamp_ns < rhs.timestamp_ns;});
-
+              
     if (ply_frames_.empty()) {
         RCLCPP_ERROR(node_->get_logger(), "No timestamped image point-cloud .ply files found in: %s", directory.string().c_str());
         return false;
@@ -351,9 +328,9 @@ bool LocalizationApp::LoadInitialPose(Eigen::Matrix4f& pose) const {
         const float y = static_cast<float>(initial_pose_[1]);
         const float z = static_cast<float>(initial_pose_[2]);
         const float yaw = static_cast<float>(initial_pose_[3]);
-        pose(0, 0) = std::cos(yaw);
+        pose(0, 0) = std::cos(yaw); 
         pose(0, 1) = -std::sin(yaw);
-        pose(1, 0) = std::sin(yaw);
+        pose(1, 0) = std::sin(yaw); 
         pose(1, 1) = std::cos(yaw);
         pose(0, 3) = x;
         pose(1, 3) = y;
@@ -424,7 +401,7 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr LocalizationApp::ScalePlyColorCloud(const
         output.z = factor * point.z;
         scaled->points.push_back(output);
     }
-
+    
     scaled->width = static_cast<std::uint32_t>(scaled->size());
     scaled->height = 1;
     scaled->is_dense = input->is_dense;
@@ -441,9 +418,9 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr LocalizationApp::FilterInputCloud(const pcl:
     finite->width = static_cast<std::uint32_t>(finite->size());
     finite->height = 1;
     finite->is_dense = true;
-
+    
     if (input_voxel_leaf_size_ <= 0.0 || finite->empty()) return finite;
-
+    
     auto filtered = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
     pcl::VoxelGrid<pcl::PointXYZ> voxel;
     voxel.setInputCloud(finite);
@@ -465,7 +442,7 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr LocalizationApp::FilterColorCloud(const p
     finite->is_dense = true;
 
     if (input_voxel_leaf_size_ <= 0.0 || finite->empty()) return finite;
-
+    
     auto filtered = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
     pcl::VoxelGrid<pcl::PointXYZRGB> voxel;
     voxel.setInputCloud(finite);
@@ -497,12 +474,14 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr LocalizationApp::CropSubmap(const Eigen::Mat
 bool LocalizationApp::RunLocalization() {
     Eigen::Matrix4f pose;
     if (!LoadInitialPose(pose)) return false;
-
+    
     if (!OpenDB3File()) return false;
     DB3Frame db3_frame;
-
+    
     std::size_t processed = 0;
     std::size_t failed = 0;
+
+    motion_predictor_->Reset();
     for (const auto& frame : ply_frames_) {
         if (!rclcpp::ok()) break;
         if (max_frames_ > 0 && processed >= static_cast<std::size_t>(max_frames_)) break;
@@ -517,61 +496,49 @@ bool LocalizationApp::RunLocalization() {
             return false;
         }
 
-        // ================= TODO：Localization =================
-        // 請在此實作自己的定位演算法；目前提供基礎 NDT 作為起點。
-        // ======================================================
-        // 可用輸入：input 為已縮放與降採樣的 image point clouds，
-        // 　　　　　submap 為局部地圖， 
-        // 　　　　　pose 為上一幀接受的姿態（第一幀使用初始姿態）。
-        // 感測器資料：db3_frame.gnss_pose、db3_frame.imu_data；
-        // 　　　　　　使用前請檢查 has_gnss_pose、has_imu_data，並確認時間與座標系是否適用。
-        // 預期輸出：candidate 為點雲座標系到 map 座標系的 4x4 姿態矩陣， score 為配準評分，converged 表示本幀定位是否成功。
-        // 可替換 AlignNDT() 或加入 GNSS / IMU 融合與自訂成功判定。
-        Eigen::Matrix4f candidate = pose;
+        // 1. 運動學先驗動態初值推算 (過濾 noisy init_guess)
+        Eigen::Matrix4f init_guess = (processed == 0) ? pose : 
+            motion_predictor_->PredictInitialGuess(pose, frame.timestamp_ns);
+
+        // Track01 / Track02：若有 GNSS 資料，可用於初值融合
+        if (db3_frame.has_gnss_pose) {
+            init_guess(0, 3) = static_cast<float>(db3_frame.gnss_pose.pose.position.x);
+            init_guess(1, 3) = static_cast<float>(db3_frame.gnss_pose.pose.position.y);
+        }
+
+        // 2. Coarse-to-Fine G-ICP 雙層配準
+        Eigen::Matrix4f candidate_pose = init_guess;
         double score = std::numeric_limits<double>::infinity();
-        const bool converged = AlignNDT(input, submap, pose, candidate, score);
-        if (converged) {
-            pose = candidate;
+        bool converged = gicp_matcher_->Align(input, submap, init_guess, candidate_pose, score);
+
+        // 3. 姿態合理性檢驗與動態懲罰修復 (Outlier Gating)
+        Eigen::Matrix4f final_pose = candidate_pose;
+        const bool physically_valid = motion_predictor_->ValidateAndCorrect(
+            candidate_pose, score, frame.timestamp_ns, final_pose);
+
+        if (converged && physically_valid) {
+            pose = final_pose;
+            motion_predictor_->UpdateState(pose, frame.timestamp_ns);
         } else {
             ++failed;
-            RCLCPP_WARN(node_->get_logger(), "NDT failed at frame %zu; keeping previous pose.", processed);
+            pose = final_pose; // 採用運動先驗安全姿態
+            motion_predictor_->UpdateState(pose, frame.timestamp_ns);
+            RCLCPP_WARN(node_->get_logger(), "Frame %zu: Alignment rejected or failed; applied motion prior.", processed);
         }
-        // ======================================================
-        
-        // Always write one result per loaded frame, preserving input/output correspondence.
+
         const auto color = FilterColorCloud(ScalePlyColorCloud(raw_color, ply_scale_));
         PublishFrame(input, color, submap, pose, frame.timestamp_ns);
         WritePose(pose);
         ++processed;
         rclcpp::spin_some(node_);
         if (processed == 1 || processed % 25 == 0) {
-            RCLCPP_INFO(node_->get_logger(), "Frame %zu/%zu: NDT=%s, score=%.4f, pose=(%.3f, %.3f, %.3f)",
-                        processed, ply_frames_.size(), converged ? "converged" : "failed", score, pose(0, 3), pose(1, 3), pose(2, 3));
+            RCLCPP_INFO(node_->get_logger(), "Frame %zu/%zu: G-ICP=%s, score=%.4f, pose=(%.3f, %.3f, %.3f)",
+                        processed, ply_frames_.size(), converged ? "OK" : "REJECTED", score,
+                        pose(0, 3), pose(1, 3), pose(2, 3));
         }
     }
-    RCLCPP_INFO(node_->get_logger(), "Finished: %zu poses, %zu failed alignments.", processed, failed);
+    RCLCPP_INFO(node_->get_logger(), "Finished: %zu poses, %zu corrected frames.", processed, failed);
     return processed > 0;
-}
-
-bool LocalizationApp::AlignNDT(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& source,
-                               const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& target,
-                               const Eigen::Matrix4f& initial_guess,
-                               Eigen::Matrix4f& pose, double& score) const {
-    pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> ndt;
-    ndt.setResolution(ndt_resolution_);
-    ndt.setStepSize(ndt_step_size_);
-    ndt.setTransformationEpsilon(ndt_transformation_epsilon_);
-    ndt.setMaximumIterations(ndt_max_iterations_);
-    ndt.setInputSource(source);
-    ndt.setInputTarget(target);
-
-    pcl::PointCloud<pcl::PointXYZ> aligned;
-    ndt.align(aligned, initial_guess);
-    if (!ndt.hasConverged()) return false;
-
-    pose = ndt.getFinalTransformation();
-    score = ndt.getFitnessScore();
-    return IsFinite(pose) && std::isfinite(score);
 }
 
 // ** ================================================================== **
@@ -677,7 +644,7 @@ bool LocalizationApp::TimestampNsFromPlyFilename(const boost::filesystem::path& 
     const std::string marker = "_ts_";
     const std::size_t marker_position = stem.rfind(marker);
     if (marker_position == std::string::npos) return false;
-
+    
     try {
         const std::string nanoseconds = stem.substr(marker_position + marker.size());
         std::size_t parsed = 0;

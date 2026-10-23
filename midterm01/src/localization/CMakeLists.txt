@@ -30,6 +30,20 @@ include_directories(
 
 add_definitions(${PCL_DEFINITIONS})
 
+add_library(localization_core
+  src/motion_predictor.cpp
+  src/coarse_to_fine_gicp.cpp
+)
+ament_target_dependencies(localization_core
+  rclcpp
+  geometry_msgs
+  pcl_conversions
+)
+target_link_libraries(localization_core
+  ${PCL_LIBRARIES}
+  Eigen3::Eigen
+)
+
 add_executable(localization src/localization.cpp)
 ament_target_dependencies(localization
   rosbag2_cpp
@@ -43,6 +57,7 @@ ament_target_dependencies(localization
   pcl_conversions
 )
 target_link_libraries(localization
+  localization_core
   ${PCL_LIBRARIES}
   Eigen3::Eigen
   Boost::filesystem

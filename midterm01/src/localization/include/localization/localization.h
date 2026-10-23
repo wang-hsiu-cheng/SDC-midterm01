@@ -10,7 +10,6 @@
 #include <boost/filesystem.hpp>
 
 #include <Eigen/Dense>
-#include <Eigen/Geometry>
 
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
@@ -24,6 +23,8 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
+#include "localization/motion_predictor.h"
+#include "localization/coarse_to_fine_gicp.h"
 
 namespace localization {
 
@@ -57,8 +58,8 @@ private:
     bool LoadPlyFrame(const PlyFrameInfo& frame, pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
                       pcl::PointCloud<pcl::PointXYZRGB>::Ptr& color_cloud) const;
     bool LoadInitialPose(Eigen::Matrix4f& pose) const;
-    
 
+    
     // ** input data/map processing **
     pcl::PointCloud<pcl::PointXYZ>::Ptr ScalePlyPointCloud(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& input, double scale) const;
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr ScalePlyColorCloud(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr& input, double scale) const;
@@ -68,11 +69,7 @@ private:
 
     // ** Localization **
     bool RunLocalization();
-    bool AlignNDT(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& source,
-                  const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& target,
-                  const Eigen::Matrix4f& initial_guess,
-                  Eigen::Matrix4f& pose, double& score) const;
-    
+
     // ** Rviz $ Record **
     void PublishGlobalMap();
     void PublishFrame(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& input,
@@ -112,23 +109,22 @@ private:
     std::vector<double> initial_pose_;
     std::string save_path_;
     std::string save_file_;
-    
 
+    // 系統預處理參數
     double map_voxel_leaf_size_ = 1.0;
     double input_voxel_leaf_size_ = 0.3;
     int min_input_points_ = 10;
     double submap_half_size_ = 100.0;
     double submap_half_height_ = 30.0;
-
-    double ndt_resolution_ = 8.0;
-    double ndt_step_size_ = 0.8;
-    double ndt_transformation_epsilon_ = 0.05;
-    int ndt_max_iterations_ = 30;
     double ply_scale_ = 3.0;
 
     bool publish_global_map_ = false;
     int max_frames_ = 0;
     bool keep_alive_ = true;
+
+    // 演算法獨立模組執行個體
+    std::unique_ptr<MotionPredictor> motion_predictor_;
+    std::unique_ptr<CoarseToFineGICP> gicp_matcher_;
 
     std::ofstream result_file_;
     pcl::PointCloud<pcl::PointXYZ>::Ptr map_cloud_;

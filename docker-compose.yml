@@ -1,0 +1,26 @@
+services:
+  sdc_ros2_dev:
+    build: .
+    image: sdc_ros2_dev:latest
+    container_name: mid1_container
+    network_mode: host
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ../SDC-midterm01/midterm01:/root/midterm
+      - ../SDC-midterm01/data:/root/Code_LoGeR
+      - ../SDC-midterm01/data:/root/data
+
+    stdin_open: true
+    tty: true
+    privileged: true
+    stop_grace_period: 1s
+
+    devices:
+      - "/dev/dri:/dev/dri"
+      - "/dev/dxg:/dev/dxg"
+    group_add:
+      - "990"

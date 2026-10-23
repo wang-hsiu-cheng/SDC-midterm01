@@ -235,7 +235,7 @@ bool LocalizationApp::LoadDB3Frame(std::int64_t timestamp_ns, DB3Frame& frame) {
     rclcpp::Serialization<geometry_msgs::msg::PoseStamped> gnss_serialization;
     rclcpp::Serialization<sensor_msgs::msg::Imu> imu_serialization;
     try {
-        while (next_db3_message_ && next_db3_message_->time_stamp <= timestamp_ns) {
+        while (next_db3_message_ && next_db3_message_->recv_timestamp <= timestamp_ns) {
             rclcpp::SerializedMessage serialized(*next_db3_message_->serialized_data);
             if (next_db3_message_->topic_name == gnss_topic) {
                 gnss_serialization.deserialize_message(&serialized, &frame.gnss_pose);
@@ -476,7 +476,7 @@ bool LocalizationApp::RunLocalization() {
     if (!LoadInitialPose(pose)) return false;
     
     if (!OpenDB3File()) return false;
-    DB3Frame db3_frame;
+    // DB3Frame db3_frame;
     
     std::size_t processed = 0;
     std::size_t failed = 0;
@@ -485,6 +485,7 @@ bool LocalizationApp::RunLocalization() {
     for (const auto& frame : ply_frames_) {
         if (!rclcpp::ok()) break;
         if (max_frames_ > 0 && processed >= static_cast<std::size_t>(max_frames_)) break;
+        DB3Frame db3_frame;
         if (!LoadDB3Frame(frame.timestamp_ns, db3_frame)) return false;
         pcl::PointCloud<pcl::PointXYZ>::Ptr raw_cloud;
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr raw_color;
@@ -502,8 +503,13 @@ bool LocalizationApp::RunLocalization() {
 
         // Track01 / Track02：若有 GNSS 資料，可用於初值融合
         if (db3_frame.has_gnss_pose) {
-            init_guess(0, 3) = static_cast<float>(db3_frame.gnss_pose.pose.position.x);
-            init_guess(1, 3) = static_cast<float>(db3_frame.gnss_pose.pose.position.y);
+            const float gx = static_cast<float>(db3_frame.gnss_pose.pose.position.x);
+            const float gy = static_cast<float>(db3_frame.gnss_pose.pose.position.y);
+            const float dist = std::hypot(gx - init_guess(0, 3), gy - init_guess(1, 3));
+            if (dist < 3.0f) {
+                init_guess(0, 3) = 0.8f * init_guess(0, 3) + 0.2f * gx;
+                init_guess(1, 3) = 0.8f * init_guess(1, 3) + 0.2f * gy;
+            }
         }
 
         // 2. Coarse-to-Fine G-ICP 雙層配準
@@ -511,19 +517,32 @@ bool LocalizationApp::RunLocalization() {
         double score = std::numeric_limits<double>::infinity();
         bool converged = gicp_matcher_->Align(input, submap, init_guess, candidate_pose, score);
 
-        // 3. 姿態合理性檢驗與動態懲罰修復 (Outlier Gating)
+        if (std::abs(candidate_pose(2, 3) - pose(2, 3)) > 0.3f) {
+            candidate_pose(2, 3) = 0.7f * pose(2, 3) + 0.3f * candidate_pose(2, 3);
+        }
+
+        // 3. 姿態檢驗與安全推進
         Eigen::Matrix4f final_pose = candidate_pose;
-        const bool physically_valid = motion_predictor_->ValidateAndCorrect(
+        bool physically_valid = motion_predictor_->ValidateAndCorrect(
             candidate_pose, score, frame.timestamp_ns, final_pose);
 
-        if (converged && physically_valid) {
-            pose = final_pose;
+        if (converged && physically_valid && score < 2.0) {
+            pose = candidate_pose;
             motion_predictor_->UpdateState(pose, frame.timestamp_ns);
         } else {
             ++failed;
-            pose = final_pose; // 採用運動先驗安全姿態
-            motion_predictor_->UpdateState(pose, frame.timestamp_ns);
-            RCLCPP_WARN(node_->get_logger(), "Frame %zu: Alignment rejected or failed; applied motion prior.", processed);
+            // 【核心防凍結修復】：配準失敗時，不可原地停滯！
+            // 若運動預測尚未累積有效速度 (位移極小)，直接採用 init_guess 往前推進
+            const double displacement = (final_pose.block<3, 1>(0, 3) - pose.block<3, 1>(0, 3)).norm();
+            if (displacement < 0.05) {
+                pose = init_guess;
+            } else {
+                pose = final_pose;
+            }
+            // 失敗時不將靜止狀態更新進速度歷史，避免速度被洗成 0
+            RCLCPP_WARN(node_->get_logger(), 
+                        "Frame %zu: Alignment rejected (converged=%d, score=%.2f); progressing with prior/init.", 
+                        processed, converged, score);
         }
 
         const auto color = FilterColorCloud(ScalePlyColorCloud(raw_color, ply_scale_));
@@ -531,7 +550,7 @@ bool LocalizationApp::RunLocalization() {
         WritePose(pose);
         ++processed;
         rclcpp::spin_some(node_);
-        if (processed == 1 || processed % 25 == 0) {
+        if (processed == 1 || processed % 20 == 0) {
             RCLCPP_INFO(node_->get_logger(), "Frame %zu/%zu: G-ICP=%s, score=%.4f, pose=(%.3f, %.3f, %.3f)",
                         processed, ply_frames_.size(), converged ? "OK" : "REJECTED", score,
                         pose(0, 3), pose(1, 3), pose(2, 3));
@@ -567,11 +586,14 @@ void LocalizationApp::PublishFrame(const pcl::PointCloud<pcl::PointXYZ>::ConstPt
     input_message.header.stamp = recorded_time;
     input_cloud_pub_->publish(input_message);
 
-    sensor_msgs::msg::PointCloud2 submap_message;
-    pcl::toROSMsg(*submap, submap_message);
-    submap_message.header.frame_id = "map";
-    submap_message.header.stamp = recorded_time;
-    submap_pub_->publish(submap_message);
+    static int submap_tick = 0;
+    if (++submap_tick % 10 == 0) {
+        sensor_msgs::msg::PointCloud2 submap_message;
+        pcl::toROSMsg(*submap, submap_message);
+        submap_message.header.frame_id = "map";
+        submap_message.header.stamp = recorded_time;
+        submap_pub_->publish(submap_message);
+    }
 
     tf_broadcaster_->sendTransform(ToTransformStamped(pose, "map", "image_point_cloud", timestamp_ns));
 

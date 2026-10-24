@@ -53,6 +53,10 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_executable(matcher_bench src/matcher_bench.cpp)
+target_link_libraries(matcher_bench ${PCL_LIBRARIES} Eigen3::Eigen)
+install(TARGETS matcher_bench DESTINATION lib/${PROJECT_NAME})
+
 add_executable(localization src/localization.cpp)
 ament_target_dependencies(localization
   rosbag2_cpp

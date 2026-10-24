@@ -13,7 +13,7 @@ def generate_launch_description():
     default_params_file = os.path.join(pkg_share, 'config', 'localization_params.yaml')
     arguments = [
         DeclareLaunchArgument('data_path', default_value='/root/data/Track1', description='Track directory'),
-        DeclareLaunchArgument('bag_path', default_value='', description='Optional .db3 bag'),
+        DeclareLaunchArgument('bag_path', default_value=PathJoinSubstitution([LaunchConfiguration('data_path'), 'Track1.db3'])),
         DeclareLaunchArgument('ply_path', default_value=PathJoinSubstitution([LaunchConfiguration('data_path'), 'raw_ply'])),
         DeclareLaunchArgument('init_guess_file', default_value=PathJoinSubstitution([LaunchConfiguration('data_path'), 'init_guess.txt'])),
 

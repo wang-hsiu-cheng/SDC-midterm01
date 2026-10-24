@@ -76,10 +76,14 @@ bool CoarseToFineGICP::Align(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& sou
     final_pose = gicp_fine.getFinalTransformation();
     final_score = gicp_fine.getFitnessScore();
 
-    const bool is_valid = final_pose.array().isFinite().all() && 
-                          std::isfinite(final_score) && 
-                          (final_score <= config_.max_acceptable_score);
-    return is_valid;
+    const bool is_finite = final_pose.array().isFinite().all() && std::isfinite(final_score);
+    if (!is_finite) {
+        return false;
+    }
+
+    // PCL 的 hasConverged() 或分數達到合格標準 (小於 max_acceptable_score) 即視為成功
+    const bool converged = (gicp_fine.hasConverged() || final_score <= config_.max_acceptable_score);
+    return converged;
 }
 
 }  // namespace localization

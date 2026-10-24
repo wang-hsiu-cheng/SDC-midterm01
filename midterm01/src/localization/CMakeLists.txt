@@ -44,6 +44,15 @@ target_link_libraries(localization_core
   Eigen3::Eigen
 )
 
+add_executable(scale_solver src/scale_solver.cpp)
+ament_target_dependencies(scale_solver rclcpp PCL)
+target_link_libraries(scale_solver ${PCL_LIBRARIES})
+
+install(TARGETS
+  scale_solver
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 add_executable(localization src/localization.cpp)
 ament_target_dependencies(localization
   rosbag2_cpp

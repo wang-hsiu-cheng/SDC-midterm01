@@ -2,31 +2,48 @@
   ros__parameters:
     # 點雲與地圖前處理
     map_voxel_leaf_size: 1.0
-    input_voxel_leaf_size: 0.3
-    submap_half_size: 100.0
-    submap_half_height: 30.0
+    input_voxel_leaf_size: 0.5
+    submap_half_size: 40.0
+    submap_half_height: 10.0
     min_input_points: 10
-    ply_scale: 3.0
+    ply_scale: 8.0               # ⚠ 交接筆記寫 9.0，此處為 8.0，請確認以哪個為準
 
-    # Coarse-to-Fine G-ICP 雙層配準參數
-    coarse_voxel_size: 1.2
-    coarse_max_corr_dist: 3.0
-    coarse_max_iterations: 35
-    fine_voxel_size: 0.3
-    fine_max_corr_dist: 0.8
-    fine_max_iterations: 25
-    gicp_transformation_epsilon: 0.0001
-    gicp_rotation_epsilon: 0.0001
-    gicp_max_fitness_score: 3.0
+    # 相機姿態校正（視為外參：result 會自動補回，輸出的是原始 PLY 座標系位姿）
+    camera_pitch_offset: -0.07
+    camera_yaw_offset: 0.05      # ⚠ 交接筆記寫 0.0；可參考 log 中的 fwd_axis_yaw 決定
+    output_raw_frame_pose: true  # true: init_guess 與 result 皆為原始 PLY 座標系；false: 舊行為
 
-    # 運動先驗與動態懲罰 (Track03 核心)
+    # NDT
+    ndt_resolution: 3.0
+    ndt_step_size: 0.2
+    ndt_transformation_epsilon: 0.01
+    ndt_max_iterations: 35
+
+    # 運動先驗
+    max_speed: 25.0              # m/s
+    speed_ema_alpha: 0.3
+
+    # NDT 修正量軟限幅（init_guess 車體座標系，每幀上限）
+    max_long_correction: 0.5     # 縱向：退化方向，主要靠速度先驗
+    max_lat_correction: 0.3      # 橫向：NDT 最可信的方向
+    max_vert_correction: 0.2
+    max_rot_correction_deg: 1.5
+    divergence_dist: 3.0         # 超過才整幀丟棄並滑行
+    divergence_angle_deg: 10.0
+    max_fitness_score: 1.0e9     # 預設關閉；先看 log 的 score 分布再設門檻
+
+    # 前進軸自校正（補償 camera_yaw_offset 誤差）
+    learn_forward_axis: true
+    forward_axis_alpha: 0.005
+    max_forward_axis_dev_deg: 5.0
+
+    # 以下為舊 MotionPredictor 參數，目前主迴圈未使用
     enable_motion_prior: true
-    max_linear_velocity: 35.0      # m/s (超過此瞬時車速判定配準跳變)
-    max_angular_velocity: 1.5      # rad/s (超過此角速度判定 Yaw 偏離)
-    motion_prior_weight: 0.5       # 與 noisy init_guess 融合之權重
-    outlier_threshold_dist: 3.0    # 雜訊偏差超過 3m 則啟動懲罰自適應增強
+    max_linear_velocity: 60.0
+    max_angular_velocity: 5.0
+    motion_prior_weight: 0.5
+    outlier_threshold_dist: 2.0
 
-    # 系統運作
     publish_global_map: false
     keep_alive: true
     max_frames: 0

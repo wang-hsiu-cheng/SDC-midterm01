@@ -38,7 +38,7 @@ int LocalizationApp::Start(int argc, char** argv) {
         return -1;
     }
     diag_file_.open(output_path.string() + ".diag.csv");
-    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg\n";
+    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,ply_scale\n";
 
     if (!IndexPlyFiles(ply_path_) || !LoadMap()) {
         Shutdown();
@@ -108,6 +108,14 @@ bool LocalizationApp::LoadParameters() {
     declare_double("ndt_transformation_epsilon", ndt_config_.transformation_epsilon);
     declare_int("ndt_max_iterations", ndt_config_.max_iterations);
 
+    declare_bool("scale_estimation_enabled", scale_config_.enabled);
+    declare_double("scale_search_ratio", scale_config_.search_ratio);
+    declare_int("scale_candidates", scale_config_.candidates);
+    declare_int("scale_search_interval", scale_config_.interval);
+    declare_double("scale_smoothing", scale_config_.smoothing);
+    declare_double("scale_min_ratio", scale_config_.min_ratio);
+    declare_double("scale_max_ratio", scale_config_.max_ratio);
+    declare_double("scale_min_gain", scale_config_.min_gain);
     declare_bool("init_search_enabled", init_search_config_.enabled);
     declare_bool("init_search_dump", init_search_dump_);
     declare_string("init_search_criterion", init_search_config_.criterion);
@@ -356,6 +364,7 @@ bool LocalizationApp::RunLocalization() {
     MapManager map_manager(map_cloud_, map_config_);
     NdtMatcher matcher(ndt_config_);
     StateEstimator estimator(estimator_config_);
+    ScaleEstimator scale_estimator(scale_config_, ply_scale_);
 
     std::int64_t prev_timestamp_ns = 0;
     double bias_sigma = 0.0;  // 0 = 使用 estimator 預設
@@ -372,8 +381,8 @@ bool LocalizationApp::RunLocalization() {
         pcl::PointCloud<pcl::PointXYZ>::Ptr raw_cloud;
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr raw_color;
         if (!LoadPlyFrame(frame, raw_cloud, raw_color)) return false;
-        const auto input = FilterInputCloud(ScalePlyPointCloud(raw_cloud, ply_scale_));
-        const bool input_ok = static_cast<int>(input->size()) >= min_input_points_;
+        auto input = FilterInputCloud(ScalePlyPointCloud(raw_cloud, scale_estimator.scale()));
+        bool input_ok = static_cast<int>(input->size()) >= min_input_points_;
 
         const bool first = (processed == 0);
         const auto t0 = std::chrono::steady_clock::now();
@@ -440,6 +449,22 @@ bool LocalizationApp::RunLocalization() {
 
         if (map_manager.Update(guess.block<3, 1>(0, 3))) matcher.SetTarget(map_manager.submap());
 
+        if (scale_estimator.Due(processed) && !map_manager.submap()->empty()) {
+            // 點雲尺度會隨時間改變：在預測位姿用一組等比候選尺度各對齊一次，看哪個尺度對得最好（單起點即可）
+            std::vector<double> scale_fitness;
+            for (const double candidate_scale : scale_estimator.Candidates()) {
+                const auto candidate = FilterInputCloud(ScalePlyPointCloud(raw_cloud, candidate_scale));
+                Eigen::Matrix4f aligned;
+                double candidate_fitness = -1.0, candidate_probability = 0.0;
+                const bool ok = static_cast<int>(candidate->size()) >= min_input_points_ &&
+                                matcher.Align(candidate, guess, aligned, candidate_fitness, candidate_probability);
+                scale_fitness.push_back(ok ? candidate_fitness : -1.0);
+            }
+            scale_estimator.Update(scale_fitness);
+            input = FilterInputCloud(ScalePlyPointCloud(raw_cloud, scale_estimator.scale()));
+            input_ok = static_cast<int>(input->size()) >= min_input_points_;
+        }
+
         bool converged = false;
         double fitness = -1.0;
         StateEstimator::UpdateInfo info;
@@ -487,7 +512,7 @@ bool LocalizationApp::RunLocalization() {
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 
         if (publish_frames_) {
-            const auto color = FilterColorCloud(ScalePlyColorCloud(raw_color, ply_scale_));
+            const auto color = FilterColorCloud(ScalePlyColorCloud(raw_color, scale_estimator.scale()));
             PublishFrame(input, color, map_manager.submap(), pose, frame.timestamp_ns);
         }
         WritePose(pose);
@@ -505,15 +530,15 @@ bool LocalizationApp::RunLocalization() {
         diag_file_ << ',' << sigma_lon << ',' << sigma_lat << ',' << sigma_yaw << ',' << spread_lon << ',' << n_eff << ',' << estimator.accel_bias();
         const auto yaw_of = [](const Eigen::Matrix4f& T) { return std::atan2(T(1, 0), T(0, 0)); };
         diag_file_ << ',' << guess(0, 3) << ',' << guess(1, 3) << ',' << yaw_of(guess) << ',' << measured(0, 3) << ','
-                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << '\n';
+                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << scale_estimator.scale() << '\n';
         ++processed;
         rclcpp::spin_some(node_);
 
         if (processed == 1 || processed % 100 == 0) {
             RCLCPP_INFO(node_->get_logger(),
-                        "Frame %zu/%zu: v=%.2fm/s bias=%+.4f ba=%+.3f beta=%+.2fdeg pose=(%.1f, %.1f) fit=%.3f infl=%.1f ms=%.0f",
+                        "Frame %zu/%zu: v=%.2fm/s bias=%+.4f ba=%+.3f beta=%+.2fdeg pose=(%.1f, %.1f) fit=%.3f infl=%.1f scale=%.2f ms=%.0f",
                         processed, ply_frames_.size(), estimator.speed(), estimator.bias(), estimator.accel_bias(),
-                        estimator.beta() * 180.0 / M_PI, pose(0, 3), pose(1, 3), fitness, info.inflation, ms);
+                        estimator.beta() * 180.0 / M_PI, pose(0, 3), pose(1, 3), fitness, info.inflation, scale_estimator.scale(), ms);
         }
     }
     RCLCPP_INFO(node_->get_logger(), "Finished: %zu poses, %zu frames without NDT update, %zu stationary (ZUPT) frames, mean R inflation %.2f.",

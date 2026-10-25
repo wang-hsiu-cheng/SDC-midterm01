@@ -23,6 +23,16 @@
     ndt_transformation_epsilon: 0.01
     ndt_max_iterations: 35
 
+    # 線上尺度估計（因果）：點雲尺度會在序列中改變，固定 ply_scale 會讓 NDT 把位姿拉偏；ply_scale 是起始（標稱）值
+    scale_estimation_enabled: false
+    scale_search_ratio: 1.08      # 相鄰候選的尺度比
+    scale_candidates: 5           # 候選個數（奇數）
+    scale_search_interval: 3      # 每隔幾幀搜尋一次
+    scale_smoothing: 0.3          # 對數尺度的指數平滑係數
+    scale_min_ratio: 0.75         # 估計值相對 ply_scale 的範圍
+    scale_max_ratio: 1.35
+    scale_min_gain: 0.01          # 最佳 fitness 要比目前尺度低這個比例才更新
+
     # 第 0 幀初始位姿搜尋（init_guess 航向有雜訊；以 init 與 IMU 姿態航向為中心，由 NDT probability 挑最佳）
     init_search_enabled: true
     init_search_criterion: probability   # probability｜fitness：第 0 幀挑最佳起點的依據

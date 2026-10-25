@@ -1,0 +1,7 @@
+# Track3 專屬覆寫：launch 會依 data_path 的目錄名自動疊在 localization_params.yaml 之後。
+# 只放與通用設定不同的參數。
+/**:
+  ros__parameters:
+    # 通用值 8.5 是 Track1 以 GNSS 驗證的；Track3 沒有 GNSS，改以 GNSS-free 自洽度選：
+    # 前 900 幀掃 7.0–8.0，fitness 最低（0.223）、軌跡落在五組中位，且零偏估計不再被拉到 −0.046（8.5 時）。
+    ply_scale: 7.5

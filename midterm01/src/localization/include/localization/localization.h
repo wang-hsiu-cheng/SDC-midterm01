@@ -113,7 +113,9 @@ private:
     // 起步靜止段估計陀螺儀零偏：樣本數與標準差門檻（超過視為車已在動，改由濾波器在線估計）
     int bias_min_samples_ = 50;
     double bias_max_stddev_ = 0.003;
-    double bias_prior_sigma_unknown_ = 0.02;
+    // 第 0 幀前靜止樣本不足時（如 Track3 只有 4 個）改用先驗：零偏是感測器常數，Track1 與 Track3 的靜止段都約 −0.004 rad/s
+    double gyro_bias_prior_ = 0.0;           // rad/s
+    double bias_prior_sigma_unknown_ = 0.02; // rad/s
 
     bool publish_frames_ = true;
     bool publish_global_map_ = false;

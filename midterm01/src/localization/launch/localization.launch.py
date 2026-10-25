@@ -29,13 +29,18 @@ def generate_launch_description():
         data_path = LaunchConfiguration('data_path').perform(context).rstrip('/')
         bag_path = LaunchConfiguration('bag_path').perform(context) or os.path.join(
             data_path, os.path.basename(data_path) + '.db3')
+        # 每個 track 的專屬覆寫（如 localization_params_Track3.yaml）；排在通用 yaml 之後，所以會覆寫它
+        track_params_file = os.path.join(
+            pkg_share, 'config', 'localization_params_' + os.path.basename(data_path) + '.yaml')
+        parameter_files = [params_file_path]
+        if os.path.exists(track_params_file):
+            parameter_files.append(track_params_file)
 
         localization_node = Node(
             package='localization', executable='localization',
             name='image_point_cloud_localizer', output='screen',
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
-            parameters=[
-                params_file_path,  # 載入 YAML 完整超參數
+            parameters=parameter_files + [
                 {
                     'use_sim_time': False,
                     'map_path': LaunchConfiguration('data_path'),

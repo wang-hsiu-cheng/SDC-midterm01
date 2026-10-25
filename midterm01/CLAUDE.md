@@ -72,7 +72,7 @@ python3 src/localization/tools/eval_ate.py src/localization/result/Track1_result
     /root/data/Track1/raw_ply /root/data/Track1/ref/gnss.csv
 ```
 
-launch 參數：`data_path`、`bag_path`、`ply_path`、`init_guess_file`、`save_path`、`save_file`、`params_file`、`log_level`。演算法參數放在 `config/localization_params.yaml`。
+launch 參數：`data_path`、`bag_path`、`ply_path`、`init_guess_file`、`save_path`、`save_file`、`params_file`、`log_level`。演算法參數放在 `config/localization_params.yaml`；各 track 的差異放 `config/localization_params_<Track名>.yaml`（launch 依 `data_path` 目錄名自動疊載覆寫，目前只有 Track3：`ply_scale: 7.5`）。直接用 `ros2 run` 時要自己加 `--params-file` 兩個檔。
 
 ---
 

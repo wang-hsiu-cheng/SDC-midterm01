@@ -22,7 +22,8 @@
     imu_topic: /imu/data
     bias_min_samples: 50          # 第 0 幀前至少這麼多 IMU 樣本才估計靜止零偏
     bias_max_stddev: 0.003        # rad/s，超過視為車已在動
-    bias_prior_sigma_unknown: 0.02
+    gyro_bias_prior: -0.004       # rad/s，靜止樣本不足時的先驗（感測器常數；Track1／Track3 靜止段皆約 −0.004）
+    bias_prior_sigma_unknown: 0.003
 
     # EKF 初始不確定度與過程雜訊
     init_sigma_xy: 1.0

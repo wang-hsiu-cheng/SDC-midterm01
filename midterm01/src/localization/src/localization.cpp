@@ -110,6 +110,7 @@ bool LocalizationApp::LoadParameters() {
 
     declare_int("bias_min_samples", bias_min_samples_);
     declare_double("bias_max_stddev", bias_max_stddev_);
+    declare_double("gyro_bias_prior", gyro_bias_prior_);
     declare_double("bias_prior_sigma_unknown", bias_prior_sigma_unknown_);
 
     auto& e = estimator_config_;
@@ -364,8 +365,8 @@ bool LocalizationApp::RunLocalization() {
                 RCLCPP_INFO(node_->get_logger(), "Initial gyro bias %.5f rad/s (std %.5f).", bias, stddev);
             } else {
                 bias_sigma = bias_prior_sigma_unknown_;
-                estimator.Initialize(init_pose, 0.0, bias_sigma);
-                RCLCPP_WARN(node_->get_logger(), "Not enough static IMU data for bias; estimating online.");
+                estimator.Initialize(init_pose, gyro_bias_prior_, bias_sigma);
+                RCLCPP_WARN(node_->get_logger(), "Not enough static IMU data for bias; using prior %.4f rad/s (sigma %.4f) and estimating online.", gyro_bias_prior_, bias_sigma);
             }
         } else {
             const double dt = static_cast<double>(frame.timestamp_ns - prev_timestamp_ns) * 1e-9;

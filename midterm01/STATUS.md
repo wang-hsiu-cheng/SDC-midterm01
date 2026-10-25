@@ -1,6 +1,6 @@
 # STATUS — SDC 2026 Midterm01 Localization
 
-> 最後更新：2026-10-25。每次工作結束時更新本檔（任務勾選、實驗紀錄、待決問題）。
+> 最後更新：2026-10-25（IMU＋不鎖死 EKF 第一版，worktree `imu-ekf` / branch `worktree-imu-ekf`，尚未 commit）。每次工作結束時更新本檔（任務勾選、實驗紀錄、待決問題）。
 
 ## 1. 截止與計分
 
@@ -85,16 +85,17 @@ IMU ─────────────────────────�
 - [x] bag 讀取：`tools/extract_bag.py` → `data/TrackN/ref/{imu,gnss}.csv`（Track3 無 GNSS）
 - [x] `tools/eval_ate.py`：GNSS 參考軌跡＋Kaggle 公式（時間插值、yaw wrap）
 - [x] 評估 G-ICP 是否取代 NDT（`matcher_bench`，見 §7）→ **結論：不採用 PCL G-ICP 取代 NDT**
-- [ ] 移除 `txt_to_idx_x_y_yaw.py` 的平滑 import；修正 launch 的 `bag_path` 預設
+- [ ] 移除 `txt_to_idx_x_y_yaw.py` 的平滑 import
+- [x] launch 的 `bag_path` 預設改為 `<data_path>/<目錄名>.db3`
 
 ### P1 — 10/26 重構骨架＋第一版跑通
-- [ ] 拆除廢棄程式，建立 §4 的模組骨架（CMake `localization_core`）
+- [x] 拆除廢棄程式（coarse_to_fine_gicp / motion_predictor / scale_solver），建立 `ImuProcessor` / `MapManager` / `NdtMatcher` / `StateEstimator`（編進 `localization_core`）；主節點只剩 I/O 與流程
 - [ ] 尺度實驗：固定尺度 vs 每幀估計，用 Track1 GNSS 驗證
-- [ ] 第一版 ScanMatcher（NDT 或 GICP）＋等速預測，三個 track 全長跑通
+- [~] 第一版 NDT＋EKF：Track1 全長跑通（E=3.88），Track3 尚未跑（無 GNSS，只能看 diag 與 Kaggle）
 - [ ] 第一次本地評估並記錄
 
 ### P2 — 10/27 精度
-- [ ] IMU 融合進 StateEstimator
+- [x] IMU 融合進 StateEstimator（陀螺儀 yaw＋零偏狀態、姿態扣重力的前向加速度）
 - [ ] 第 0 幀初始化的全域/多假設搜尋（init_guess 有雜訊）
 - [ ] Track3 調參（權重最高）
 - [ ] 第一批 Kaggle 提交（三個 track）
@@ -133,12 +134,25 @@ IMU ─────────────────────────�
 | 10/25 | bench guess 模式 | T1 22 幀 × 7 擾動 | 單幀配準，起點=GNSS xy/yaw（roll/pitch/z 取自現有結果）±1 m 縱/橫、±3° | NDT r2 1.22、r3 1.25、r5 2.11；G-ICP c1 1.84、c2 2.33、0.5 m c1 2.06 | — | 詳見下方分析 |
 
 | 10/25 | 工作區舊版 | T1 全長（跑到 2481/3011 被手動停止） | 舊 NDT r3＋限幅/coast，scale 8 | 75.6（rmse_p 71.9, yaw 18.7°）；前 1700 幀 ≈ 2.4–3.1 | — | 約 1750 幀起發散，見下方分析 |
+| 10/25 | worktree imu-ekf | T1 全長 | EKF＋IMU，單起點 NDT r2，accel_gain 1，psp 0.3 | 4.21（rmse_p 3.54, yaw 3.34°） | — | **不發散**；但對參數極敏感，見下 |
+| 10/25 | 同上 | T1 全長 | 消融：accel_gain 0（只靠 NDT 修速度） | 571 | — | 車幾乎不動（v≈0），NDT 縱向拉不動，加速度計是必要的 |
+| 10/25 | 同上 | T1 全長 | 單起點 NDT，改 psp 0.1／0.6、r3、lon 0.5／2.0 | 49／27／68／39／99 | — | 全部發散：縱向一旦偏 >幾 m，NDT 拉不回 |
+| 10/25 | 同上 | T1 全長 | 多起點（縱向 0,±1.5,±3，取 NDT probability 最大），r2 | 577（4 組皆是） | — | 起步即被拉向「後方」候選，v 被學成≈0 後鎖死 |
+| 10/25 | 同上 | T1 全長 | 多起點＋r3：psp 0.1／0.3／0.6、lon 0.5／2.0 | 3.88／3.81／107／3.75／3.79 | — | 除 psp 0.6 外穩定 |
+| 10/25 | 同上（預設值） | T1 全長 | 多起點＋r3、psp 0.1（現行 yaml 預設） | **3.88**（rmse_p 3.18, yaw 3.51°） | — | 確定性可重現；前 300 幀 rmse 7.0 m（lon +4.4）、1800–2400 幀 yaw 偏 +5.6° |
 
 **舊版 Track1 全長 run 評估（10/25，2481 幀）**
 - 分段：0–300 幀 rmse_p 2.5–3.0 m（yaw 6–7°，起步低速段）；300–1600 幀 0.8–1.7 m（縱/橫誤差 std 各約 0.9 m，平均偏差 lon +0.45 / lat +0.19 m）；1650–1850 幀 yaw 誤差先升到 9–15°、橫向 2–4 m；1875 幀起縱向線性發散（約 −0.4 m/frame），2400 幀誤差 ≈ 220 m。
 - 發散機制：估計速度在 1875 後掉到 1–2 m/s，GT 仍約 12 m/s。原因鏈：①yaw 先漂（旋轉修正限幅 1.5°/幀，追不回 10°+）→ ②NDT 結果被 `divergence_*` 整幀拒絕並 coast → ③速度 EMA 只在「被採納」的幀更新，且量的是被 `max_long_correction=0.5` 截斷後的位移 → 速度被往下拉、永遠回不來 → ④縱向誤差線性累積。限幅/coast 是造成不可恢復的設計缺陷，不是調參問題。
 - 估計速度本身也很吵（v_est 與 GT 差 ±2–4 m/s，例如 900 幀 7.4 vs 10.1），等速模型品質不足；IMU 尚未使用。
 - 結論：舊版不可救（與 §3 判定一致），全部移除限幅/coast/速度 EMA/前進軸自學習。
+
+**IMU＋EKF 設計與發現（10/25）**
+- 狀態 `[x, y, yaw, v, b_g, beta]`：beta＝行進方向相對車體 x 軸的偏角（取代舊的 camera_yaw_offset／前進軸自學習）。NDT 當 (x,y,yaw) 量測，縱向 σ 大於橫向；馬氏距離超過門檻只**放大 R**，不丟棄、不截斷修正量。z/roll/pitch 不進濾波器，以固定比例向 NDT 靠攏。
+- IMU 資料：gyro wz 即 yaw rate（5 s 視窗對 GNSS 斜率 0.92），**零偏約 −0.004 rad/s（110 s 累積 ~28°）必須估計**；Track1 第 0 幀前有 165 個靜止樣本可初估，Track3 只有 4 個（改在線估，σ 0.02）。
+- 加速度計：用 IMU 內建 orientation 扣重力後從靜止積分，100 s 內與 GNSS 速度差約 1 m/s；用加速度低通估重力方向或高通濾波都不行。**速度的唯一可靠來源是它**，NDT 的縱向約束弱。
+- 發散根因（NDT 縱向收斂域窄）沒有消除：目前穩定區間很窄（psp 0.6 即發散）。多起點在 r3 有效、在 r2 反而有害，推測 NDT 縱向最佳點有系統性偏後（尺度／形狀失真）。下一步應處理縱向觀測：每幀尺度估計、前處理（去遠處點）、或用先驗加權選起點，而不是只看 probability。
+- 注意：NDT probability 選起點未加先驗，是目前最脆弱的環節。
 
 **G-ICP vs NDT 分析（10/25）**
 - NDT 從參考位姿出發誤差小，但幾乎不修正擾動：縱向 ±1 m 仍剩 0.7–0.97 m、橫向 +1 m 仍剩 0.99 m，yaw ±3° 只修回到約 2–2.8°。它的「準」主要來自起點本來就準，收斂域很窄。

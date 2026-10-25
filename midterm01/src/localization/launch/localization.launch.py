@@ -11,13 +11,13 @@ from launch_ros.parameter_descriptions import ParameterValue
 def generate_launch_description():
     pkg_share = get_package_share_directory('localization')
     arguments = [
-        DeclareLaunchArgument('data_path', default_value='/root/data/Track2', description='Track directory'),
+        DeclareLaunchArgument('data_path', default_value='/root/data/Track3', description='Track directory'),
         DeclareLaunchArgument('bag_path', default_value='', description='Empty = <data_path>/<track dir name>.db3'),
         DeclareLaunchArgument('ply_path', default_value=PathJoinSubstitution([LaunchConfiguration('data_path'), 'raw_ply'])),
         DeclareLaunchArgument('init_guess_file', default_value=PathJoinSubstitution([LaunchConfiguration('data_path'), 'init_guess.txt'])),
 
         DeclareLaunchArgument('save_path', default_value='/root/midterm/src/localization/result/'),
-        DeclareLaunchArgument('save_file', default_value='Track2_result.txt'),
+        DeclareLaunchArgument('save_file', default_value='Track3_result.txt'),
 
         DeclareLaunchArgument('params_file', default_value='',
                               description='Empty = config/localization_params_<data_path 目錄名>.yaml'),

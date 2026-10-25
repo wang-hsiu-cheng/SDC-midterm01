@@ -24,6 +24,7 @@
 
     # 第 0 幀初始位姿搜尋（init_guess 航向有雜訊；以 init 與 IMU 姿態航向為中心，由 NDT probability 挑最佳）
     init_search_enabled: true
+    init_search_dump: false       # 診斷：輸出每個起點的結果到 <結果檔>.initsearch.csv
     init_search_yaw_range_deg: 30.0
     init_search_yaw_step_deg: 5.0
     init_search_xy_offsets: [0.0, 2.0, -2.0]   # m，縱向×橫向格狀組合

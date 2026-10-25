@@ -109,6 +109,7 @@ bool LocalizationApp::LoadParameters() {
     declare_int("ndt_max_iterations", ndt_config_.max_iterations);
 
     declare_bool("init_search_enabled", init_search_config_.enabled);
+    declare_bool("init_search_dump", init_search_dump_);
     declare_double("init_search_yaw_range_deg", init_search_config_.yaw_range_deg);
     declare_double("init_search_yaw_step_deg", init_search_config_.yaw_step_deg);
     node_->declare_parameter<std::vector<double>>("init_search_xy_offsets", init_search_config_.xy_offsets);
@@ -390,6 +391,14 @@ bool LocalizationApp::RunLocalization() {
                 double imu_yaw = 0.0;
                 if (imu.LatestHeading(imu_yaw)) centers.push_back(imu_yaw);
                 const auto searched = InitialPoseSearch(init_search_config_).Search(matcher, input, init_pose, centers);
+                if (init_search_dump_) {
+                    std::ofstream dump((boost::filesystem::path(save_path_) / (save_file_ + ".initsearch.csv")).string());
+                    dump << "start_yaw_deg,lon,lat,yaw_deg,x,y,probability,fitness\n";
+                    for (const auto& s : searched.samples) {
+                        dump << s.start_yaw_deg << ',' << s.lon << ',' << s.lat << ',' << s.yaw_deg << ',' << s.x << ',' << s.y << ','
+                             << s.probability << ',' << s.fitness << '\n';
+                    }
+                }
                 if (searched.found) {
                     RCLCPP_INFO(node_->get_logger(),
                                 "Initial pose search: %d starts, yaw %.1f -> %.1f deg (IMU yaw %.1f), prob %.3f fit %.3f.",

@@ -31,6 +31,10 @@ InitialPoseSearch::Result InitialPoseSearch::Search(NdtMatcher& matcher, NdtMatc
                     NdtMatcher::Candidate candidate;
                     ++best.tried;
                     if (!matcher.Align(source, guess, candidate.pose, candidate.fitness, candidate.probability)) continue;
+                    best.samples.push_back({yaw * 180.0 / M_PI, lon, lat,
+                                            std::atan2(candidate.pose(1, 0), candidate.pose(0, 0)) * 180.0 / M_PI,
+                                            candidate.pose(0, 3), candidate.pose(1, 3), candidate.probability,
+                                            candidate.fitness});
                     if (!best.found || candidate.probability > best.probability) {
                         best.found = true;
                         best.pose = candidate.pose;

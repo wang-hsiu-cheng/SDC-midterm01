@@ -1,6 +1,7 @@
 # STATUS — SDC 2026 Midterm01 Localization
 
 > 最後更新：2026-10-25（IMU＋不鎖死 EKF 第一版，worktree `imu-ekf` / branch `worktree-imu-ekf`，尚未 commit）。每次工作結束時更新本檔（任務勾選、實驗紀錄、待決問題）。
+> 跑測試、並行 sweep、背景執行與容器隔離的規範見 `TESTING.md`（跑任何測試前先讀）。
 
 ## 1. 截止與計分
 

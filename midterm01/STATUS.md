@@ -79,7 +79,7 @@ IMU ─────────────────────────�
 
 ### P0 — 10/25 準備
 - [x] 讀規格、盤點 workspace、寫 CLAUDE.md / STATUS.md
-- [ ] （使用者）Track1 驗證完成後下載 Track2
+- [x] （使用者）Track1 驗證完成後下載 Track2
 - [x] 重構地圖降採樣 `map_modified` 與離線視覺化 `visualization`（含 launch、rviz）
 - [x] 產生 map 快取：Track1 1 m / 0.5 m、Track3 1 m（Track2 待下載後產生）
 - [x] bag 讀取：`tools/extract_bag.py` → `data/TrackN/ref/{imu,gnss}.csv`（Track3 無 GNSS）
@@ -92,7 +92,7 @@ IMU ─────────────────────────�
 - [x] 拆除廢棄程式（coarse_to_fine_gicp / motion_predictor / scale_solver），建立 `ImuProcessor` / `MapManager` / `NdtMatcher` / `StateEstimator`（編進 `localization_core`）；主節點只剩 I/O 與流程
 - [ ] 尺度實驗：固定尺度 vs 每幀估計，用 Track1 GNSS 驗證
 - [~] 第一版 NDT＋EKF：Track1 全長跑通（E=3.88），Track3 尚未跑（無 GNSS，只能看 diag 與 Kaggle）
-- [ ] 第一次本地評估並記錄
+- [x] 第一次本地評估並記錄
 
 ### P2 — 10/27 精度
 - [x] IMU 融合進 StateEstimator（陀螺儀 yaw＋零偏狀態、姿態扣重力的前向加速度）

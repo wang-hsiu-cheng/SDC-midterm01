@@ -73,6 +73,26 @@ def section_a(d, x, y):
         print('   濾波器自認 σ 中位 縱向 %.2f m 橫向 %.2f m' % (np.median(d['sigma_lon'][5:]), np.median(d['sigma_lat'][5:])))
 
 
+def section_d(d, x, y, sig_thr=0.02):
+    """更新離散度：NDT 每幀都提議修正，濾波器是不是只在少數幀才真的採用？（只用診斷檔，不需 GNSS）"""
+    if not all(k in d.dtype.names for k in ('pred_x', 'meas_x')):
+        return
+    n = len(d)
+    applied = np.hypot(x - d['pred_x'], y - d['pred_y'])[1:]
+    proposed = np.hypot(d['meas_x'] - d['pred_x'], d['meas_y'] - d['pred_y'])[1:]
+    sig = np.where(applied >= sig_thr)[0]
+    if len(sig) >= 2:
+        gaps = np.diff(sig)
+        gap_txt = '間隔中位 %d／p90 %d／最大 %d 幀' % (np.median(gaps), np.percentile(gaps, 90), gaps.max())
+    else:
+        gap_txt = '顯著更新少於 2 次'
+    top = np.sort(applied)[::-1][:max(1, len(applied) // 10)].sum() / max(applied.sum(), 1e-12)
+    print('\n== D. 更新離散度（前 %d 幀；顯著更新 = 套用修正 ≥ %.0f cm）' % (n, sig_thr * 100))
+    print('   採用比例（套用修正量總和／NDT 提議量總和）%.3f；顯著更新的幀 %.1f%%（%s）' % (
+        applied.sum() / max(proposed.sum(), 1e-12), 100.0 * len(sig) / len(applied), gap_txt))
+    print('   修正量集中度：最大的 10%% 幀占總修正量 %.0f%%（均勻分布約 10–20%%；越高 = 越像「少數幀才更新」）' % (100 * top))
+
+
 def section_b(d, x, y, yaw, ts, gnss_path):
     gt, gx, gy, gyaw = E.load_gnss(gnss_path)
     t = (ts - gt[0]).astype(float)
@@ -185,6 +205,7 @@ def main():
     print('result: %s  (%s, %d frames)' % (os.path.basename(result), track, n))
 
     section_a(d, x, y)
+    section_d(d, x, y)
     gnss = os.path.join(root, 'ref', 'gnss.csv')
     if os.path.exists(gnss) and sum(1 for _ in open(gnss)) > 2:
         section_b(d, x, y, yaw, ts, gnss)

@@ -31,12 +31,16 @@ include_directories(
 add_definitions(${PCL_DEFINITIONS})
 
 add_library(localization_core
-  src/motion_predictor.cpp
-  src/coarse_to_fine_gicp.cpp
+  src/imu_processor.cpp
+  src/map_manager.cpp
+  src/ndt_matcher.cpp
+  src/state_estimator.cpp
 )
 ament_target_dependencies(localization_core
   rclcpp
-  geometry_msgs
+  sensor_msgs
+  rosbag2_cpp
+  rosbag2_storage
   pcl_conversions
 )
 target_link_libraries(localization_core
@@ -44,14 +48,9 @@ target_link_libraries(localization_core
   Eigen3::Eigen
 )
 
-add_executable(scale_solver src/scale_solver.cpp)
-ament_target_dependencies(scale_solver rclcpp PCL)
-target_link_libraries(scale_solver ${PCL_LIBRARIES})
-
-install(TARGETS
-  scale_solver
-  DESTINATION lib/${PROJECT_NAME}
-)
+add_executable(matcher_bench src/matcher_bench.cpp)
+target_link_libraries(matcher_bench ${PCL_LIBRARIES} Eigen3::Eigen)
+install(TARGETS matcher_bench DESTINATION lib/${PROJECT_NAME})
 
 add_executable(localization src/localization.cpp)
 ament_target_dependencies(localization

@@ -3,15 +3,13 @@
     # 點雲與地圖前處理
     map_voxel_leaf_size: 1.0
     input_voxel_leaf_size: 0.5
-    submap_half_size: 40.0
-    submap_half_height: 10.0
     min_input_points: 10
-    ply_scale: 8.0               # ⚠ 交接筆記寫 9.0，此處為 8.0，請確認以哪個為準
+    ply_scale: 8.0
 
-    # 相機姿態校正（視為外參：result 會自動補回，輸出的是原始 PLY 座標系位姿）
-    camera_pitch_offset: -0.07
-    camera_yaw_offset: 0.05      # ⚠ 交接筆記寫 0.0；可參考 log 中的 fwd_axis_yaw 決定
-    output_raw_frame_pose: true  # true: init_guess 與 result 皆為原始 PLY 座標系；false: 舊行為
+    # 子地圖（只在車輛移動超過 recrop 距離時重切）
+    submap_half_size: 50.0
+    submap_half_height: 15.0
+    submap_recrop_distance: 10.0
 
     # NDT
     ndt_resolution: 3.0
@@ -19,31 +17,37 @@
     ndt_transformation_epsilon: 0.01
     ndt_max_iterations: 35
 
-    # 運動先驗
-    max_speed: 25.0              # m/s
-    speed_ema_alpha: 0.3
+    # IMU
+    imu_topic: /imu/data
+    bias_min_samples: 50          # 第 0 幀前至少這麼多 IMU 樣本才估計靜止零偏
+    bias_max_stddev: 0.003        # rad/s，超過視為車已在動
+    bias_prior_sigma_unknown: 0.02
 
-    # NDT 修正量軟限幅（init_guess 車體座標系，每幀上限）
-    max_long_correction: 0.5     # 縱向：退化方向，主要靠速度先驗
-    max_lat_correction: 0.3      # 橫向：NDT 最可信的方向
-    max_vert_correction: 0.2
-    max_rot_correction_deg: 1.5
-    divergence_dist: 3.0         # 超過才整幀丟棄並滑行
-    divergence_angle_deg: 10.0
-    max_fitness_score: 1.0e9     # 預設關閉；先看 log 的 score 分布再設門檻
+    # EKF 初始不確定度與過程雜訊
+    init_sigma_xy: 1.0
+    init_sigma_yaw_deg: 3.0
+    init_sigma_speed: 3.0
+    init_sigma_bias: 0.002
+    init_sigma_beta_deg: 3.0
+    process_sigma_xy: 0.05
+    process_sigma_yaw: 0.005
+    process_sigma_speed: 0.1      # ⚠ 調到 0.6 會發散（Track1），勿放大
+    process_sigma_bias: 1.0e-4
+    process_sigma_beta: 1.0e-3
+    accel_gain: 1.0               # 前向線加速度（IMU 姿態扣重力後）進預測；0 = 不使用
+    max_speed: 40.0
 
-    # 前進軸自校正（補償 camera_yaw_offset 誤差）
-    learn_forward_axis: true
-    forward_axis_alpha: 0.005
-    max_forward_axis_dev_deg: 5.0
+    # NDT 量測雜訊（縱向是退化方向，給較大的不確定度）
+    meas_sigma_lon: 1.0
+    meas_sigma_lat: 0.3
+    meas_sigma_yaw_deg: 1.5
+    gate_chi2: 11.34
+    fitness_ref: 0.0              # >0 時 fitness 超過此值會放大量測 R
+    multi_start_lon_offsets: [0.0, 1.5, -1.5, 3.0, -3.0]   # 只有 [0.0] = 單起點
+    z_gain: 0.5
+    tilt_gain: 0.5
 
-    # 以下為舊 MotionPredictor 參數，目前主迴圈未使用
-    enable_motion_prior: true
-    max_linear_velocity: 60.0
-    max_angular_velocity: 5.0
-    motion_prior_weight: 0.5
-    outlier_threshold_dist: 2.0
-
+    publish_frames: true
     publish_global_map: false
     keep_alive: true
     max_frames: 0

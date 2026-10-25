@@ -10,7 +10,6 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 def generate_launch_description():
     pkg_share = get_package_share_directory('localization')
-    default_params_file = os.path.join(pkg_share, 'config', 'localization_params.yaml')
     arguments = [
         DeclareLaunchArgument('data_path', default_value='/root/data/Track3', description='Track directory'),
         DeclareLaunchArgument('bag_path', default_value='', description='Empty = <data_path>/<track dir name>.db3'),
@@ -20,27 +19,27 @@ def generate_launch_description():
         DeclareLaunchArgument('save_path', default_value='/root/midterm/src/localization/result/'),
         DeclareLaunchArgument('save_file', default_value='Track3_result.txt'),
 
-        DeclareLaunchArgument('params_file', default_value=default_params_file, description='Path to yaml parameters file'),
+        DeclareLaunchArgument('params_file', default_value='',
+                              description='Empty = config/localization_params_<data_path 目錄名>.yaml'),
         DeclareLaunchArgument('log_level', default_value='info'),
     ]
 
     def create_nodes(context):
-        params_file_path = LaunchConfiguration('params_file').perform(context)
         data_path = LaunchConfiguration('data_path').perform(context).rstrip('/')
         bag_path = LaunchConfiguration('bag_path').perform(context) or os.path.join(
             data_path, os.path.basename(data_path) + '.db3')
-        # 每個 track 的專屬覆寫（如 localization_params_Track3.yaml）；排在通用 yaml 之後，所以會覆寫它
-        track_params_file = os.path.join(
+        # 每個 track 一份完整參數檔（localization_params_Track1/2/3.yaml）
+        params_file_path = LaunchConfiguration('params_file').perform(context) or os.path.join(
             pkg_share, 'config', 'localization_params_' + os.path.basename(data_path) + '.yaml')
-        parameter_files = [params_file_path]
-        if os.path.exists(track_params_file):
-            parameter_files.append(track_params_file)
+        if not os.path.exists(params_file_path):
+            raise RuntimeError('找不到參數檔 %s；請新增該 track 的 yaml 或用 params_file:=<path> 指定' % params_file_path)
 
         localization_node = Node(
             package='localization', executable='localization',
             name='image_point_cloud_localizer', output='screen',
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
-            parameters=parameter_files + [
+            parameters=[
+                params_file_path,
                 {
                     'use_sim_time': False,
                     'map_path': LaunchConfiguration('data_path'),

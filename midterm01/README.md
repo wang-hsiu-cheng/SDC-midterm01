@@ -2,7 +2,9 @@
 /src/localization/
 ├── CMakeLists.txt                       # 將子模組編譯為獨立庫 localization_core，供 localization 鏈接
 ├── config/
-│   └── localization_params.yaml         # 【新增】所有演算法與系統超參數統一配置檔
+│   ├── localization_params_Track1.yaml  # 【新增】Track1 的演算法與系統超參數（完整一份）
+│   ├── localization_params_Track2.yaml  # 【新增】Track2（尚未驗證，暫同 Track1）
+│   └── localization_params_Track3.yaml  # 【新增】Track3（ply_scale 不同）
 ├── include/localization/
 │   ├── motion_predictor.h               # 【獨立庫標頭】運動學推算、初值動態濾波與姿態合理性懲罰
 │   ├── coarse_to_fine_gicp.h            # 【獨立庫標頭】多尺度體素降採樣與兩階段 G-ICP 配準核心

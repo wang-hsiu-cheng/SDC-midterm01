@@ -52,10 +52,9 @@ source install/setup.bash
 # 不要同時跑兩個（各自載入 2.7 GB ASCII，記憶體不足時會無聲失敗）
 ros2 launch localization map_modified.launch.py data_path:=/root/data/Track1 voxel_leaf_size:=1.0
 
-# 定位（注意：bag_path 預設寫死 Track1.db3，其他 track 必須覆寫）
+# 定位（bag_path 預設 <data_path>/<目錄名>.db3；參數檔依 data_path 目錄名選 config/localization_params_<Track名>.yaml）
 ros2 launch localization localization.launch.py \
-    data_path:=/root/data/Track3 bag_path:=/root/data/Track3/Track3.db3 \
-    save_file:=Track3_result.txt
+    data_path:=/root/data/Track3 save_file:=Track3_result.txt
 
 # 轉 Kaggle 格式
 python3 src/localization/processing_codes/txt_to_idx_x_y_yaw.py \
@@ -72,7 +71,7 @@ python3 src/localization/tools/eval_ate.py src/localization/result/Track1_result
     /root/data/Track1/raw_ply /root/data/Track1/ref/gnss.csv
 ```
 
-launch 參數：`data_path`、`bag_path`、`ply_path`、`init_guess_file`、`save_path`、`save_file`、`params_file`、`log_level`。演算法參數放在 `config/localization_params.yaml`；各 track 的差異放 `config/localization_params_<Track名>.yaml`（launch 依 `data_path` 目錄名自動疊載覆寫，目前只有 Track3：`ply_scale: 7.5`）。直接用 `ros2 run` 時要自己加 `--params-file` 兩個檔。
+launch 參數：`data_path`、`bag_path`、`ply_path`、`init_guess_file`、`save_path`、`save_file`、`params_file`、`log_level`。每個 track 一份完整的參數檔：`config/localization_params_Track1.yaml`、`_Track2.yaml`、`_Track3.yaml`（launch 依 `data_path` 的目錄名選用，找不到會報錯；也可用 `params_file:=<path>` 指定）。三份大多相同，目前只有 `ply_scale` 不同（Track1/2 為 8.5、Track3 為 7.5）；改共用參數時三份一起改，改完用 `python3 src/localization/tools/diff_params.py` 檢查差異是否只剩刻意的部分。直接用 `ros2 run` 時要自己加 `--params-file`。
 
 ---
 
@@ -89,7 +88,8 @@ launch 參數：`data_path`、`bag_path`、`ply_path`、`init_guess_file`、`sav
 | `include/localization/ply_sequence.h` | PLY 索引、位姿檔讀取（header-only） | 新增 |
 | `src/matcher_bench.cpp` | 配準器比較基準（追蹤模式／guess 模式） | 實驗工具 |
 | `tools/extract_bag.py`、`tools/eval_ate.py` | bag 匯出 IMU/GNSS、Kaggle 指標離線評估 | 新增 |
-| `config/localization_params.yaml` | 演算法參數 | 隨重構改寫 |
+| `tools/diff_params.py` | 列出三份 track 參數檔之間數值不同的參數 | 新增 |
+| `config/localization_params_Track1/2/3.yaml` | 各 track 的演算法參數（完整獨立的三份） | 10/25 |
 | `processing_codes/txt_to_idx_x_y_yaw.py` | txt → Kaggle csv | 保留；移除未使用的平滑 import |
 | `result/` | 輸出（gitignored） | — |
 

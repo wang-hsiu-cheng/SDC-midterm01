@@ -1,3 +1,7 @@
+# Track2 專用參數（完整獨立的一份；launch 依 data_path 的目錄名選用 localization_params_<Track名>.yaml）。
+# ⚠ 三個 track 的 yaml 大多相同；改共用參數時要三份一起改，改完用 tools/diff_params.py 檢查差異是否只剩刻意的部分。
+# Track2 尚未下載、未驗證：暫用 Track1 的設定。下載後請先用 GNSS 本地評估掃描 ply_scale
+# （Track1 上 8.0→8.5 讓縱向偏差變了約 3 m）。
 /**:
   ros__parameters:
     # 點雲與地圖前處理

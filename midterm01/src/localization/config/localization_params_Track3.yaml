@@ -1,7 +1,69 @@
-# Track3 專屬覆寫：launch 會依 data_path 的目錄名自動疊在 localization_params.yaml 之後。
-# 只放與通用設定不同的參數。
+# Track3 專用參數（完整獨立的一份；launch 依 data_path 的目錄名選用 localization_params_<Track名>.yaml）。
+# ⚠ 三個 track 的 yaml 大多相同；改共用參數時要三份一起改，改完用 tools/diff_params.py 檢查差異是否只剩刻意的部分。
+# Track3 沒有 GNSS，ply_scale 以 GNSS-free 自洽度選：前 900 幀掃 7.0–8.0，fitness 最低（0.223）、
+# 軌跡落在五組中位；8.5 時零偏估計被拉到 −0.046（IMU 靜止段真值 −0.0041）。
+# 第 0 幀前靜止 IMU 樣本不足時用 gyro_bias_prior（見下方）。
 /**:
   ros__parameters:
-    # 通用值 8.5 是 Track1 以 GNSS 驗證的；Track3 沒有 GNSS，改以 GNSS-free 自洽度選：
-    # 前 900 幀掃 7.0–8.0，fitness 最低（0.223）、軌跡落在五組中位，且零偏估計不再被拉到 −0.046（8.5 時）。
-    ply_scale: 7.5
+    # 點雲與地圖前處理
+    map_voxel_leaf_size: 1.0
+    input_voxel_leaf_size: 0.5
+    min_input_points: 10
+    ply_scale: 7.5               # Track1 為 8.5，見檔頭說明
+    input_max_range: 30.0         # m（水平距離），0 = 不限；⚠ 20 會發散（Track1），勿再調小
+
+    # 子地圖（只在車輛移動超過 recrop 距離時重切）
+    submap_half_size: 50.0
+    submap_half_height: 15.0
+    submap_recrop_distance: 10.0
+
+    # NDT
+    ndt_resolution: 3.0           # ⚠ 設 2 會發散（Track1，多起點下），勿改
+    ndt_step_size: 0.2
+    ndt_transformation_epsilon: 0.01
+    ndt_max_iterations: 35
+
+    # IMU
+    imu_topic: /imu/data
+    bias_min_samples: 50          # 第 0 幀前至少這麼多 IMU 樣本才估計靜止零偏
+    bias_max_stddev: 0.003        # rad/s，超過視為車已在動
+    gyro_bias_prior: -0.004       # rad/s，靜止樣本不足時的先驗（感測器常數；Track1／Track3 靜止段皆約 −0.004）
+    bias_prior_sigma_unknown: 0.003
+
+    # EKF 初始不確定度與過程雜訊
+    init_sigma_xy: 1.0
+    init_sigma_yaw_deg: 3.0
+    init_sigma_speed: 3.0
+    init_sigma_bias: 0.002
+    init_sigma_beta_deg: 3.0
+    init_sigma_accel_bias: 0.05
+    process_sigma_xy: 0.05
+    process_sigma_yaw: 0.005
+    process_sigma_speed: 0.1      # ⚠ 調到 0.6 會發散（Track1），勿放大
+    process_sigma_bias: 1.0e-4
+    process_sigma_beta: 1.0e-3
+    process_sigma_accel_bias: 0.01
+    accel_gain: 1.0               # 前向線加速度（IMU 姿態扣重力後）進預測；0 = 不使用
+    max_speed: 40.0
+
+    # NDT 量測雜訊（縱向是退化方向，給較大的不確定度）
+    # ⚠ 實測 NDT 創新雜訊較小（lon 0.45／lat 0.33／yaw 1.2°），但把 R 調到那麼小（並降低 spread_gain）
+    #   會讓 σ 過小而局部失控（Track1 縱向 9 m），故刻意保守，勿調小
+    meas_sigma_lon: 1.1
+    meas_sigma_lat: 0.5
+    meas_sigma_yaw_deg: 2.0
+    spread_gain: 1.0              # 多起點候選分散度加進量測 R 的倍率
+    gate_chi2: 11.34
+    fitness_ref: 0.0              # >0 時 fitness 超過此值會放大量測 R
+    multi_start_lon_offsets: [0.0, 1.5, -1.5, 3.0, -3.0]   # 只有 [0.0] = 單起點
+    fusion_probability_power: 4.0 # 候選權重 (p/p_max)^power
+    fusion_prior_sigma_lon: 2.0   # 以預測為中心的先驗
+    fusion_prior_sigma_lat: 1.0
+    fusion_prior_sigma_yaw_deg: 5.0
+    z_gain: 0.5
+    tilt_gain: 0.5
+
+    publish_frames: true
+    publish_global_map: false
+    keep_alive: true
+    max_frames: 0

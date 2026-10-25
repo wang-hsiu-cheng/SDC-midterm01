@@ -177,7 +177,7 @@ IMU ─────────────────────────�
 - Track3 的 public 只評前 5–40%（約第 157–1257 幀），含 ~40 s 靜止段，固定偏差會被重複計分。
 - 無 GNSS 的判準：IMU 靜止窗口得到的真實陀螺儀零偏 −0.0041 rad/s（Track1 也是 −0.004，同一顆感測器；靜止前向加速度偏差 ≈0）。濾波器估出的零偏若被拉離這個值，代表 NDT 的 yaw 與陀螺儀矛盾（尺度不對）。此判準僅作離線診斷，演算法本身不用未來資料。
 - 結論：8.5 對 Track3 不適用（零偏 −0.046、NIS／fitness 最差）；採 **ply_scale 7.5**（fitness 最低、軌跡為五組中位）。Track3 開頭只有 4 個靜止 IMU 樣本，估不了零偏，加零偏先驗（`gyro_bias_prior` −0.004、σ 0.003；Track1 靜止樣本充足，不受影響）。
-- 實作：launch 依 `data_path` 目錄名自動疊載 `config/localization_params_<Track名>.yaml`（存在才載入，排在通用 yaml 後覆寫）；`localization_params_Track3.yaml` 只放 `ply_scale: 7.5`。驗證：加覆寫的前 30 幀與 ply_scale 7.5 的 run 逐位元相同，與 8.5 差 3.6 m。選尺度的依據是自洽度而非 Kaggle 分數（規則 3）。
+- 實作：參數拆成每個 track 一份完整的 yaml（`localization_params_Track1/2/3.yaml`，原通用檔移除），launch 依 `data_path` 目錄名選用，找不到就報錯；三份目前只有 `ply_scale` 不同（Track1/2 為 8.5、Track3 為 7.5；Track2 尚未驗證，暫用 Track1 的值）。`tools/diff_params.py` 檢查三份的差異。驗證：Track3 用 7.5 的前 30 幀與 ply_scale 7.5 的 run 逐位元相同，與 8.5 差 3.6 m。選尺度的依據是自洽度而非 Kaggle 分數（規則 3）。
 - 未解決：所有尺度的零偏估計在第 100 幀後都漂到 ≈ −0.0076（真值 −0.0041），加速度零偏估計 −0.03～−0.04（真值 ≈0）——與尺度無關，表示 NDT 的 yaw／縱向量測或模型仍有固定偏差，原因待查。Track3 完整 run 尚未用 7.5 重跑。
 
 **IMU＋EKF 設計與發現（10/25）**

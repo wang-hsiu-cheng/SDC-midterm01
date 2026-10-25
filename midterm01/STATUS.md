@@ -359,3 +359,10 @@ IMU ─────────────────────────�
 - 尺度帶外（8.0／8.3）仍會發散，Track2 對尺度敏感；8.7 位於穩定帶中央。選尺度與銀行指標用了 Track2 的 GNSS 做本地比較（規則 7 允許；演算法本身不用 GNSS，銀行的打分只用 NDT fitness）。
 - 銀行偏移範圍（−10..30°）是依 Track2 的 init_guess 偏差設的；其他 track 若要啟用需重新評估。銀行階段每幀成本約 9 倍（約 150 幀）。
 - Kaggle 尚未提交 Track2；public 分數需另行記錄。
+
+### 合併 master 後的 Track2 驗證（2026-10-26，分支 `worktree-track2-scale`，merge commit e4259e2 之後）
+
+- Track1 全長、Track3 全長（純 yaml）與 master 已提交的 `Track1_result.txt`／`Track3_result.txt` **逐位元相同**（`cmp`）；Track1 E=1.7328。我新增的 ZUPT 行為（`zupt_sigma_accel_bias`、`zupt_accel_mean_max`）與銀行在 Track1／3 預設關閉。
+- Track2 合併後純 yaml（floor 0.6／0.5°）退步：E=**16.96**（合併前 2.27）。消融（Track2 全長，合併後程式）：只關 hold 16.13；只關 floor（`-p floor_sigma_xy:=0 -p floor_sigma_yaw_deg:=0`）**2.277**；floor 與 hold 都關 2.217；floor_xy 0.2（yaw 0.5°）2.349；floor_xy 0.3（yaw 0）2.622。→ 退步來自 master 的 floor 0.6，不是 `zupt_hold`。
+- 處理：**只改 Track2 yaml**，`floor_sigma_xy`／`floor_sigma_yaw_deg` 設 0；Track1／3 yaml 不動。此 yaml 的數值設定與 `mg2nofloor`（E=2.2773，用 `-p` 覆寫跑的）相同，**未另跑純 yaml 版**（跑到一半被停止），引用結果請用 `mg2nofloor` 並註明覆寫。
+- 未解決／備註：Track2 對 ply_scale 與 floor 敏感（8.0／8.3 發散，floor ≥0.3 變差）；Kaggle 尚未提交 Track2。

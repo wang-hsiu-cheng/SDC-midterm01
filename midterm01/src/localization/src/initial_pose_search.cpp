@@ -10,6 +10,7 @@ InitialPoseSearch::Result InitialPoseSearch::Search(NdtMatcher& matcher, NdtMatc
                                                     const Eigen::Matrix4f& init_pose,
                                                     const std::vector<double>& yaw_centers_rad) const {
     Result best;
+    const bool by_fitness = config_.criterion == "fitness";
     if (!config_.enabled || config_.yaw_step_deg <= 0.0) return best;
 
     const double init_yaw = std::atan2(init_pose(1, 0), init_pose(0, 0));
@@ -35,7 +36,8 @@ InitialPoseSearch::Result InitialPoseSearch::Search(NdtMatcher& matcher, NdtMatc
                                             std::atan2(candidate.pose(1, 0), candidate.pose(0, 0)) * 180.0 / M_PI,
                                             candidate.pose(0, 3), candidate.pose(1, 3), candidate.probability,
                                             candidate.fitness});
-                    if (!best.found || candidate.probability > best.probability) {
+                    const bool better = by_fitness ? candidate.fitness < best.fitness : candidate.probability > best.probability;
+                    if (!best.found || better) {
                         best.found = true;
                         best.pose = candidate.pose;
                         best.probability = candidate.probability;

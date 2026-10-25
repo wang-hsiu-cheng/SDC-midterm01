@@ -110,6 +110,7 @@ bool LocalizationApp::LoadParameters() {
 
     declare_bool("init_search_enabled", init_search_config_.enabled);
     declare_bool("init_search_dump", init_search_dump_);
+    declare_string("init_search_criterion", init_search_config_.criterion);
     declare_double("init_search_yaw_range_deg", init_search_config_.yaw_range_deg);
     declare_double("init_search_yaw_step_deg", init_search_config_.yaw_step_deg);
     node_->declare_parameter<std::vector<double>>("init_search_xy_offsets", init_search_config_.xy_offsets);

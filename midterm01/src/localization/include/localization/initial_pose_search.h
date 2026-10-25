@@ -1,6 +1,7 @@
 #ifndef LOCALIZATION_INITIAL_POSE_SEARCH_H_
 #define LOCALIZATION_INITIAL_POSE_SEARCH_H_
 
+#include <string>
 #include <vector>
 
 #include <Eigen/Dense>
@@ -17,6 +18,9 @@ class InitialPoseSearch {
 public:
     struct Config {
         bool enabled = true;
+        // 挑最佳起點的依據：probability（轉換機率最大）或 fitness（對應點平均平方距離最小）。
+        // 直行路段的 yaw 景觀很平，兩者可能不同；fitness 對 yaw 的變化相對明顯
+        std::string criterion = "probability";
         double yaw_range_deg = 30.0;   // 每個中心左右各搜尋的範圍
         double yaw_step_deg = 5.0;
         std::vector<double> xy_offsets{0.0, 2.0, -2.0};  // m，沿候選航向的縱向與橫向各取這些偏移（做格狀組合）

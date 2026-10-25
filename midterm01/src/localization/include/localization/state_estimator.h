@@ -46,6 +46,11 @@ public:
         double spread_gain = 1.0;            // 候選分散度協方差加進 R 的倍率
         double gate_chi2 = 11.34;            // 3 自由度 99%，超過則按比例放大 R
 
+        // 協方差下限（1-sigma，0 = 不設）：P 在長時間沒有被修正後會塌縮，增益趨近 0，NDT 的修正進不來；
+        // 單純調小 R 而不設下限會讓 σ 過小而局部失控，所以兩者要一起用
+        double floor_sigma_xy = 0.0;         // m
+        double floor_sigma_yaw_deg = 0.0;
+
         // 靜止時的零速／零偏觀測（ZUPT）噪聲
         double zupt_sigma_speed = 0.02;      // m/s
         double zupt_sigma_gyro_rate = 0.002; // rad/s，窗口內陀螺儀均值當零偏觀測
@@ -71,7 +76,7 @@ public:
     // 靜止（IMU 窗口判定）時的偽量測：速度 = 0、陀螺儀均值 = 零偏。不改位姿
     void UpdateStationary(double yaw_rate_mean);
 
-    // T_meas：NDT 的 T_map_body；r_scale：依配準品質額外放大基準 R；
+    // T_meas：NDT 的 T_map_body；r_scale：基準 R 的倍率（>1 配準品質差而放大，<1 量測有把握而縮小）；
     // extra_cov：量測在 (x, y, yaw) 地圖座標下的額外協方差（例如多起點候選的分散度）
     // stationary：ZUPT 判定靜止；config.zupt_freeze_yaw 開啟時忽略這一幀量測的 yaw
     UpdateInfo Update(const Eigen::Matrix4f& T_meas, double r_scale, const Eigen::Matrix3d& extra_cov,

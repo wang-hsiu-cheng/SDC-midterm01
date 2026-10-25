@@ -110,6 +110,10 @@ private:
 
     // 配準品質：fitness 超過 ref 時，量測 R 以 (fitness/ref)^2 放大；0 = 不使用
     double fitness_ref_ = 0.0;
+    // 信心縮放：候選縱向分散度 ≤ conf_spread_max 且 fitness ≤ conf_fitness_max 時，基準 R 乘上 conf_r_scale；1 = 不使用
+    double conf_r_scale_ = 1.0;
+    double conf_spread_max_ = 0.0;   // m
+    double conf_fitness_max_ = 0.0;
     // NDT 多起點：沿預測的行進方向平移的偏移量（m），含 0；只有 0 = 單起點
     std::vector<double> multi_start_lon_offsets_{0.0};
     // 起步靜止段估計陀螺儀零偏：樣本數與標準差門檻（超過視為車已在動，改由濾波器在線估計）

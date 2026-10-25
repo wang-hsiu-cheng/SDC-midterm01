@@ -67,6 +67,10 @@ void StateEstimator::Predict(double dt, double yaw_increment_raw, double forward
     Q(5, 5) = std::pow(config_.process_sigma_beta, 2) * dt;
     Q(6, 6) = std::pow(config_.process_sigma_accel_bias, 2) * dt;
     cov_ = F * cov_ * F.transpose() + Q;
+    const double floor_xy = config_.floor_sigma_xy * config_.floor_sigma_xy;
+    const double floor_yaw = std::pow(config_.floor_sigma_yaw_deg * kDeg2Rad, 2);
+    for (const int i : {0, 1}) cov_(i, i) = std::max(cov_(i, i), floor_xy);
+    cov_(2, 2) = std::max(cov_(2, 2), floor_yaw);
 
     pose_(0, 3) = static_cast<float>(state_(0));
     pose_(1, 3) = static_cast<float>(state_(1));
@@ -109,7 +113,7 @@ StateEstimator::UpdateInfo StateEstimator::Update(const Eigen::Matrix4f& T_meas,
     Eigen::Matrix3d R0 = Eigen::Matrix3d::Zero();
     R0.topLeftCorner<2, 2>() = Rot * body_cov * Rot.transpose();
     R0(2, 2) = std::pow(config_.meas_sigma_yaw_deg * kDeg2Rad, 2);
-    R0 *= std::max(1.0, r_scale);
+    R0 *= r_scale;
     // 候選分散度反映這一幀的實際曖昧程度：候選一致 → 幾乎不加；縱向分歧 → 縱向 R 變大
     R0 += config_.spread_gain * extra_cov;
 

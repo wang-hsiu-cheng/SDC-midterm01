@@ -154,6 +154,11 @@ bool LocalizationApp::LoadParameters() {
     declare_double("z_gain", e.z_gain);
     declare_double("tilt_gain", e.tilt_gain);
     declare_double("fitness_ref", fitness_ref_);
+    declare_double("conf_r_scale", conf_r_scale_);
+    declare_double("conf_spread_max", conf_spread_max_);
+    declare_double("conf_fitness_max", conf_fitness_max_);
+    declare_double("floor_sigma_xy", e.floor_sigma_xy);
+    declare_double("floor_sigma_yaw_deg", e.floor_sigma_yaw_deg);
     node_->declare_parameter<std::vector<double>>("multi_start_lon_offsets", multi_start_lon_offsets_);
     multi_start_lon_offsets_ = node_->get_parameter("multi_start_lon_offsets").as_double_array();
     if (multi_start_lon_offsets_.empty()) multi_start_lon_offsets_ = {0.0};
@@ -452,8 +457,10 @@ bool LocalizationApp::RunLocalization() {
                     // 第 0 幀：init_guess 帶雜訊，直接以 NDT 結果作為濾波器初值
                     estimator.Initialize(merged.pose, estimator.bias(), bias_sigma);
                 } else {
-                    const double r_scale = (fitness_ref_ > 0.0 && fitness > fitness_ref_)
-                                               ? std::pow(fitness / fitness_ref_, 2) : 1.0;
+                    double r_scale = (fitness_ref_ > 0.0 && fitness > fitness_ref_)
+                                         ? std::pow(fitness / fitness_ref_, 2) : 1.0;
+                    // 候選一致且配準好 → 這一幀的 NDT 值得多信一點；分散度的額外 R 照舊加在後面
+                    if (spread_lon <= conf_spread_max_ && fitness <= conf_fitness_max_) r_scale *= conf_r_scale_;
                     info = estimator.Update(merged.pose, r_scale, merged.spread_cov, stationary);
                     inflation_sum += info.inflation;
                 }

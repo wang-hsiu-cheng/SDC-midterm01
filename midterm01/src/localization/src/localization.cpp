@@ -38,7 +38,7 @@ int LocalizationApp::Start(int argc, char** argv) {
         return -1;
     }
     diag_file_.open(output_path.string() + ".diag.csv");
-    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms\n";
+    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw\n";
 
     if (!IndexPlyFiles(ply_path_) || !LoadMap()) {
         Shutdown();
@@ -97,6 +97,7 @@ bool LocalizationApp::LoadParameters() {
     declare_double("input_voxel_leaf_size", input_voxel_leaf_size_);
     declare_int("min_input_points", min_input_points_);
     declare_double("ply_scale", ply_scale_);
+    declare_double("input_max_range", input_max_range_);
 
     declare_double("submap_half_size", map_config_.half_size);
     declare_double("submap_half_height", map_config_.half_height);
@@ -117,17 +118,24 @@ bool LocalizationApp::LoadParameters() {
     declare_double("init_sigma_speed", e.init_sigma_speed);
     declare_double("init_sigma_bias", e.init_sigma_bias);
     declare_double("init_sigma_beta_deg", e.init_sigma_beta_deg);
+    declare_double("init_sigma_accel_bias", e.init_sigma_accel_bias);
     declare_double("process_sigma_xy", e.process_sigma_xy);
     declare_double("process_sigma_yaw", e.process_sigma_yaw);
     declare_double("process_sigma_speed", e.process_sigma_speed);
     declare_double("process_sigma_bias", e.process_sigma_bias);
     declare_double("process_sigma_beta", e.process_sigma_beta);
+    declare_double("process_sigma_accel_bias", e.process_sigma_accel_bias);
     declare_double("accel_gain", e.accel_gain);
     declare_double("max_speed", e.max_speed);
     declare_double("meas_sigma_lon", e.meas_sigma_lon);
     declare_double("meas_sigma_lat", e.meas_sigma_lat);
     declare_double("meas_sigma_yaw_deg", e.meas_sigma_yaw_deg);
+    declare_double("spread_gain", e.spread_gain);
     declare_double("gate_chi2", e.gate_chi2);
+    declare_double("fusion_probability_power", fusion_config_.probability_power);
+    declare_double("fusion_prior_sigma_lon", fusion_config_.prior_sigma_lon);
+    declare_double("fusion_prior_sigma_lat", fusion_config_.prior_sigma_lat);
+    declare_double("fusion_prior_sigma_yaw_deg", fusion_config_.prior_sigma_yaw_deg);
     declare_double("z_gain", e.z_gain);
     declare_double("tilt_gain", e.tilt_gain);
     declare_double("fitness_ref", fitness_ref_);
@@ -270,9 +278,10 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr LocalizationApp::FilterInputCloud(const pcl:
     finite->points.reserve(input->size());
 
     for (const auto& point : input->points) {
-        if (std::isfinite(point.x) && std::isfinite(point.y) && std::isfinite(point.z)) {
-            finite->points.push_back(point);
-        }
+        if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z)) continue;
+        // 遠點的深度誤差隨距離快速放大，對縱向約束是偏差而非資訊
+        if (input_max_range_ > 0.0 && std::hypot(point.x, point.y) > input_max_range_) continue;
+        finite->points.push_back(point);
     }
     finite->width = static_cast<std::uint32_t>(finite->size());
     finite->height = 1;
@@ -329,6 +338,7 @@ bool LocalizationApp::RunLocalization() {
     double bias_sigma = 0.0;  // 0 = 使用 estimator 預設
     std::size_t processed = 0, skipped_updates = 0;
     double inflation_sum = 0.0;
+    MeasurementFusion fusion(fusion_config_);
 
     for (const auto& frame : ply_frames_) {
         if (!rclcpp::ok()) break;
@@ -372,8 +382,9 @@ bool LocalizationApp::RunLocalization() {
         bool converged = false;
         double fitness = -1.0;
         StateEstimator::UpdateInfo info;
+        Eigen::Matrix4f measured = guess;  // 診斷用：NDT 量測（未收斂時等於預測）
+        double spread_lon = 0.0, n_eff = 0.0;
         if (input_ok && !map_manager.submap()->empty()) {
-            Eigen::Matrix4f candidate = guess;
             std::vector<Eigen::Matrix4f> starts;
             const Eigen::Vector3f forward(std::cos(static_cast<float>(estimator.yaw())),
                                           std::sin(static_cast<float>(estimator.yaw())), 0.0f);
@@ -382,15 +393,23 @@ bool LocalizationApp::RunLocalization() {
                 start.block<3, 1>(0, 3) += static_cast<float>(offset) * forward;
                 starts.push_back(start);
             }
-            converged = matcher.AlignMultiStart(input, starts, candidate, fitness);
+            const auto candidates = matcher.AlignAll(input, starts);
+            converged = !candidates.empty();
             if (converged) {
+                // 軟加權合併候選，並以候選分散度當這一幀量測的不確定度
+                const auto merged = fusion.Merge(candidates, guess);
+                measured = merged.pose;
+                fitness = merged.fitness;
+                n_eff = merged.effective_candidates;
+                const Eigen::Vector2d heading(std::cos(estimator.yaw()), std::sin(estimator.yaw()));
+                spread_lon = std::sqrt(std::max(0.0, heading.dot(merged.spread_cov.topLeftCorner<2, 2>() * heading)));
                 if (first) {
                     // 第 0 幀：init_guess 帶雜訊，直接以 NDT 結果作為濾波器初值
-                    estimator.Initialize(candidate, estimator.bias(), bias_sigma);
+                    estimator.Initialize(merged.pose, estimator.bias(), bias_sigma);
                 } else {
                     const double r_scale = (fitness_ref_ > 0.0 && fitness > fitness_ref_)
                                                ? std::pow(fitness / fitness_ref_, 2) : 1.0;
-                    info = estimator.Update(candidate, r_scale);
+                    info = estimator.Update(merged.pose, r_scale, merged.spread_cov);
                     inflation_sum += info.inflation;
                 }
             }
@@ -407,14 +426,20 @@ bool LocalizationApp::RunLocalization() {
         WritePose(pose);
         diag_file_ << processed << ',' << converged << ',' << fitness << ',' << info.mahalanobis_sq << ','
                    << info.inflation << ',' << estimator.speed() << ',' << estimator.bias() << ','
-                   << estimator.beta() * 180.0 / M_PI << ',' << imu_interval.sample_count << ',' << ms << '\n';
+                   << estimator.beta() * 180.0 / M_PI << ',' << imu_interval.sample_count << ',' << ms;
+        double sigma_lon = 0.0, sigma_lat = 0.0, sigma_yaw = 0.0;
+        estimator.Sigma(sigma_lon, sigma_lat, sigma_yaw);
+        diag_file_ << ',' << sigma_lon << ',' << sigma_lat << ',' << sigma_yaw << ',' << spread_lon << ',' << n_eff << ',' << estimator.accel_bias();
+        const auto yaw_of = [](const Eigen::Matrix4f& T) { return std::atan2(T(1, 0), T(0, 0)); };
+        diag_file_ << ',' << guess(0, 3) << ',' << guess(1, 3) << ',' << yaw_of(guess) << ',' << measured(0, 3) << ','
+                   << measured(1, 3) << ',' << yaw_of(measured) << '\n';
         ++processed;
         rclcpp::spin_some(node_);
 
         if (processed == 1 || processed % 100 == 0) {
             RCLCPP_INFO(node_->get_logger(),
-                        "Frame %zu/%zu: v=%.2fm/s bias=%+.4f beta=%+.2fdeg pose=(%.1f, %.1f) fit=%.3f infl=%.1f ms=%.0f",
-                        processed, ply_frames_.size(), estimator.speed(), estimator.bias(),
+                        "Frame %zu/%zu: v=%.2fm/s bias=%+.4f ba=%+.3f beta=%+.2fdeg pose=(%.1f, %.1f) fit=%.3f infl=%.1f ms=%.0f",
+                        processed, ply_frames_.size(), estimator.speed(), estimator.bias(), estimator.accel_bias(),
                         estimator.beta() * 180.0 / M_PI, pose(0, 3), pose(1, 3), fitness, info.inflation, ms);
         }
     }

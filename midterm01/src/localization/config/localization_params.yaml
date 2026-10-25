@@ -5,6 +5,7 @@
     input_voxel_leaf_size: 0.5
     min_input_points: 10
     ply_scale: 8.5
+    input_max_range: 30.0         # m（水平距離），0 = 不限；⚠ 20 會發散（Track1），勿再調小
 
     # 子地圖（只在車輛移動超過 recrop 距離時重切）
     submap_half_size: 50.0
@@ -12,7 +13,7 @@
     submap_recrop_distance: 10.0
 
     # NDT
-    ndt_resolution: 3.0
+    ndt_resolution: 3.0           # ⚠ 設 2 會發散（Track1，多起點下），勿改
     ndt_step_size: 0.2
     ndt_transformation_epsilon: 0.01
     ndt_max_iterations: 35
@@ -29,21 +30,30 @@
     init_sigma_speed: 3.0
     init_sigma_bias: 0.002
     init_sigma_beta_deg: 3.0
+    init_sigma_accel_bias: 0.05
     process_sigma_xy: 0.05
     process_sigma_yaw: 0.005
     process_sigma_speed: 0.1      # ⚠ 調到 0.6 會發散（Track1），勿放大
     process_sigma_bias: 1.0e-4
     process_sigma_beta: 1.0e-3
+    process_sigma_accel_bias: 0.01
     accel_gain: 1.0               # 前向線加速度（IMU 姿態扣重力後）進預測；0 = 不使用
     max_speed: 40.0
 
     # NDT 量測雜訊（縱向是退化方向，給較大的不確定度）
-    meas_sigma_lon: 1.0
-    meas_sigma_lat: 0.3
-    meas_sigma_yaw_deg: 1.5
+    # ⚠ 實測 NDT 創新雜訊較小（lon 0.45／lat 0.33／yaw 1.2°），但把 R 調到那麼小（並降低 spread_gain）
+    #   會讓 σ 過小而局部失控（Track1 縱向 9 m），故刻意保守，勿調小
+    meas_sigma_lon: 1.1
+    meas_sigma_lat: 0.5
+    meas_sigma_yaw_deg: 2.0
+    spread_gain: 1.0              # 多起點候選分散度加進量測 R 的倍率
     gate_chi2: 11.34
     fitness_ref: 0.0              # >0 時 fitness 超過此值會放大量測 R
     multi_start_lon_offsets: [0.0, 1.5, -1.5, 3.0, -3.0]   # 只有 [0.0] = 單起點
+    fusion_probability_power: 4.0 # 候選權重 (p/p_max)^power
+    fusion_prior_sigma_lon: 2.0   # 以預測為中心的先驗
+    fusion_prior_sigma_lat: 1.0
+    fusion_prior_sigma_yaw_deg: 5.0
     z_gain: 0.5
     tilt_gain: 0.5
 

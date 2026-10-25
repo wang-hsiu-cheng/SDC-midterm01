@@ -67,8 +67,8 @@ public:
     // extra_cov：量測在 (x, y, yaw) 地圖座標下的額外協方差（例如多起點候選的分散度）
     UpdateInfo Update(const Eigen::Matrix4f& T_meas, double r_scale, const Eigen::Matrix3d& extra_cov);
 
-    // 目前位置不確定度沿行進方向／橫向的 1-sigma（診斷用）
-    void PositionSigma(double& lon, double& lat) const;
+    // 目前位置不確定度沿行進方向／橫向（m）與 yaw（deg）的 1-sigma，診斷濾波器一致性用
+    void Sigma(double& lon, double& lat, double& yaw_deg) const;
 
     const Eigen::Matrix4f& pose() const { return pose_; }
     double speed() const { return state_(3); }

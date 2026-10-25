@@ -38,7 +38,7 @@ int LocalizationApp::Start(int argc, char** argv) {
         return -1;
     }
     diag_file_.open(output_path.string() + ".diag.csv");
-    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw\n";
+    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw\n";
 
     if (!IndexPlyFiles(ply_path_) || !LoadMap()) {
         Shutdown();
@@ -427,9 +427,9 @@ bool LocalizationApp::RunLocalization() {
         diag_file_ << processed << ',' << converged << ',' << fitness << ',' << info.mahalanobis_sq << ','
                    << info.inflation << ',' << estimator.speed() << ',' << estimator.bias() << ','
                    << estimator.beta() * 180.0 / M_PI << ',' << imu_interval.sample_count << ',' << ms;
-        double sigma_lon = 0.0, sigma_lat = 0.0;
-        estimator.PositionSigma(sigma_lon, sigma_lat);
-        diag_file_ << ',' << sigma_lon << ',' << sigma_lat << ',' << spread_lon << ',' << n_eff << ',' << estimator.accel_bias();
+        double sigma_lon = 0.0, sigma_lat = 0.0, sigma_yaw = 0.0;
+        estimator.Sigma(sigma_lon, sigma_lat, sigma_yaw);
+        diag_file_ << ',' << sigma_lon << ',' << sigma_lat << ',' << sigma_yaw << ',' << spread_lon << ',' << n_eff << ',' << estimator.accel_bias();
         const auto yaw_of = [](const Eigen::Matrix4f& T) { return std::atan2(T(1, 0), T(0, 0)); };
         diag_file_ << ',' << guess(0, 3) << ',' << guess(1, 3) << ',' << yaw_of(guess) << ',' << measured(0, 3) << ','
                    << measured(1, 3) << ',' << yaw_of(measured) << '\n';

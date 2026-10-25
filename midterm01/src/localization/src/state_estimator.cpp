@@ -139,13 +139,14 @@ StateEstimator::UpdateInfo StateEstimator::Update(const Eigen::Matrix4f& T_meas,
     return info;
 }
 
-void StateEstimator::PositionSigma(double& lon, double& lat) const {
+void StateEstimator::Sigma(double& lon, double& lat, double& yaw_deg) const {
     const double heading = state_(2) + state_(5);
     const Eigen::Vector2d f(std::cos(heading), std::sin(heading));
     const Eigen::Vector2d l(-f.y(), f.x());
     const Eigen::Matrix2d P = cov_.topLeftCorner<2, 2>();
     lon = std::sqrt(std::max(0.0, f.dot(P * f)));
     lat = std::sqrt(std::max(0.0, l.dot(P * l)));
+    yaw_deg = std::sqrt(std::max(0.0, cov_(2, 2))) / kDeg2Rad;
 }
 
 }  // namespace localization

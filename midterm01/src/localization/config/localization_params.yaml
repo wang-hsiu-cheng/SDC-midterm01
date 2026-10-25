@@ -41,7 +41,9 @@
     max_speed: 40.0
 
     # NDT 量測雜訊（縱向是退化方向，給較大的不確定度）
-    meas_sigma_lon: 1.1           # 依 Track1 實測的 NDT 量測雜訊（lon 1.1 m／lat 0.5 m／yaw 1.9°）
+    # ⚠ 實測 NDT 創新雜訊較小（lon 0.45／lat 0.33／yaw 1.2°），但把 R 調到那麼小（並降低 spread_gain）
+    #   會讓 σ 過小而局部失控（Track1 縱向 9 m），故刻意保守，勿調小
+    meas_sigma_lon: 1.1
     meas_sigma_lat: 0.5
     meas_sigma_yaw_deg: 2.0
     spread_gain: 1.0              # 多起點候選分散度加進量測 R 的倍率

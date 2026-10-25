@@ -49,6 +49,7 @@ public:
         // 靜止時的零速／零偏觀測（ZUPT）噪聲
         double zupt_sigma_speed = 0.02;      // m/s
         double zupt_sigma_gyro_rate = 0.002; // rad/s，窗口內陀螺儀均值當零偏觀測
+        bool zupt_freeze_yaw = true;         // 靜止時 NDT 的 yaw 量測不進濾波器（停車時 NDT yaw 會殘留緩慢旋轉）
 
         // z / roll / pitch 每幀向 NDT 結果靠攏的比例
         double z_gain = 0.5;
@@ -72,7 +73,9 @@ public:
 
     // T_meas：NDT 的 T_map_body；r_scale：依配準品質額外放大基準 R；
     // extra_cov：量測在 (x, y, yaw) 地圖座標下的額外協方差（例如多起點候選的分散度）
-    UpdateInfo Update(const Eigen::Matrix4f& T_meas, double r_scale, const Eigen::Matrix3d& extra_cov);
+    // stationary：ZUPT 判定靜止；config.zupt_freeze_yaw 開啟時忽略這一幀量測的 yaw
+    UpdateInfo Update(const Eigen::Matrix4f& T_meas, double r_scale, const Eigen::Matrix3d& extra_cov,
+                      bool stationary = false);
 
     // 目前位置不確定度沿行進方向／橫向（m）與 yaw（deg）的 1-sigma，診斷濾波器一致性用
     void Sigma(double& lon, double& lat, double& yaw_deg) const;

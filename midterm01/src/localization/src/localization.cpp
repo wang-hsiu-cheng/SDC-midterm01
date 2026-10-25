@@ -108,6 +108,13 @@ bool LocalizationApp::LoadParameters() {
     declare_double("ndt_transformation_epsilon", ndt_config_.transformation_epsilon);
     declare_int("ndt_max_iterations", ndt_config_.max_iterations);
 
+    declare_bool("init_search_enabled", init_search_config_.enabled);
+    declare_double("init_search_yaw_range_deg", init_search_config_.yaw_range_deg);
+    declare_double("init_search_yaw_step_deg", init_search_config_.yaw_step_deg);
+    node_->declare_parameter<std::vector<double>>("init_search_xy_offsets", init_search_config_.xy_offsets);
+    init_search_config_.xy_offsets = node_->get_parameter("init_search_xy_offsets").as_double_array();
+    if (init_search_config_.xy_offsets.empty()) init_search_config_.xy_offsets = {0.0};
+
     declare_int("bias_min_samples", bias_min_samples_);
     declare_double("bias_max_stddev", bias_max_stddev_);
     declare_double("gyro_bias_prior", gyro_bias_prior_);
@@ -139,6 +146,7 @@ bool LocalizationApp::LoadParameters() {
     declare_double("gate_chi2", e.gate_chi2);
     declare_double("zupt_sigma_speed", e.zupt_sigma_speed);
     declare_double("zupt_sigma_gyro_rate", e.zupt_sigma_gyro_rate);
+    declare_bool("zupt_freeze_yaw", e.zupt_freeze_yaw);
     declare_double("fusion_probability_power", fusion_config_.probability_power);
     declare_double("fusion_prior_sigma_lon", fusion_config_.prior_sigma_lon);
     declare_double("fusion_prior_sigma_lat", fusion_config_.prior_sigma_lat);
@@ -367,6 +375,23 @@ bool LocalizationApp::RunLocalization() {
         bool stationary = false;
         double yaw_rate_mean = 0.0;
         if (first) {
+            if (input_ok) {
+                // init_guess 的航向帶雜訊：以 init 與 IMU 姿態航向為中心做多假設 NDT，由地圖匹配挑初值
+                map_manager.Update(init_pose.block<3, 1>(0, 3));
+                matcher.SetTarget(map_manager.submap());
+                std::vector<double> centers{std::atan2(init_pose(1, 0), init_pose(0, 0))};
+                double imu_yaw = 0.0;
+                if (imu.LatestHeading(imu_yaw)) centers.push_back(imu_yaw);
+                const auto searched = InitialPoseSearch(init_search_config_).Search(matcher, input, init_pose, centers);
+                if (searched.found) {
+                    RCLCPP_INFO(node_->get_logger(),
+                                "Initial pose search: %d starts, yaw %.1f -> %.1f deg (IMU yaw %.1f), prob %.3f fit %.3f.",
+                                searched.tried, centers[0] * 180.0 / M_PI, searched.yaw_deg,
+                                centers.size() > 1 ? centers[1] * 180.0 / M_PI : 0.0, searched.probability, searched.fitness);
+                    init_pose = searched.pose;
+                    guess = init_pose;
+                }
+            }
             double bias = 0.0, stddev = 0.0;
             if (imu.EstimateYawBias(frame.timestamp_ns, bias_min_samples_, bias, stddev) && stddev < bias_max_stddev_) {
                 estimator.Initialize(init_pose, bias, 0.0);
@@ -423,7 +448,7 @@ bool LocalizationApp::RunLocalization() {
                 } else {
                     const double r_scale = (fitness_ref_ > 0.0 && fitness > fitness_ref_)
                                                ? std::pow(fitness / fitness_ref_, 2) : 1.0;
-                    info = estimator.Update(merged.pose, r_scale, merged.spread_cov);
+                    info = estimator.Update(merged.pose, r_scale, merged.spread_cov, stationary);
                     inflation_sum += info.inflation;
                 }
             }

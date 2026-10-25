@@ -21,6 +21,12 @@
     ndt_transformation_epsilon: 0.01
     ndt_max_iterations: 35
 
+    # 第 0 幀初始位姿搜尋（init_guess 航向有雜訊；以 init 與 IMU 姿態航向為中心，由 NDT probability 挑最佳）
+    init_search_enabled: true
+    init_search_yaw_range_deg: 30.0
+    init_search_yaw_step_deg: 5.0
+    init_search_xy_offsets: [0.0, 2.0, -2.0]   # m，縱向×橫向格狀組合
+
     # IMU
     imu_topic: /imu/data
     bias_min_samples: 50          # 第 0 幀前至少這麼多 IMU 樣本才估計靜止零偏
@@ -58,6 +64,7 @@
     gate_chi2: 11.34
     zupt_sigma_speed: 0.02        # m/s
     zupt_sigma_gyro_rate: 0.002   # rad/s
+    zupt_freeze_yaw: true         # 靜止時略過 NDT 的 yaw 量測（方案 E）
     fitness_ref: 0.0              # >0 時 fitness 超過此值會放大量測 R
     multi_start_lon_offsets: [0.0, 1.5, -1.5, 3.0, -3.0]   # 只有 [0.0] = 單起點
     fusion_probability_power: 4.0 # 候選權重 (p/p_max)^power

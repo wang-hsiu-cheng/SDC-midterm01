@@ -23,6 +23,7 @@
 #include <pcl/point_types.h>
 
 #include "localization/imu_processor.h"
+#include "localization/initial_pose_search.h"
 #include "localization/map_manager.h"
 #include "localization/measurement_fusion.h"
 #include "localization/ndt_matcher.h"
@@ -103,6 +104,7 @@ private:
 
     MapManager::Config map_config_;
     NdtMatcher::Config ndt_config_;
+    InitialPoseSearch::Config init_search_config_;
     MeasurementFusion::Config fusion_config_;
     StateEstimator::Config estimator_config_;
 

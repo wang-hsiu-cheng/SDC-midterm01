@@ -40,6 +40,10 @@ public:
     // 只用 Advance 已取用的樣本（causal）；靜止時 yaw_rate_mean 為窗口內繞上方向角速度均值（即零偏觀測）。
     bool IsStationary(int window_samples, double accel_std_max, double gyro_std_max, double& yaw_rate_mean) const;
 
+    // 已推進到的最後一個樣本的姿態航向（body x 軸在 IMU 世界座標的 yaw，rad）；尚未取用任何樣本回傳 false。
+    // 只用 Advance 已取用的樣本（causal）。
+    bool LatestHeading(double& yaw) const;
+
     std::size_t size() const { return samples_.size(); }
 
 private:

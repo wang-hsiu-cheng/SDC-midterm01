@@ -90,11 +90,13 @@ void StateEstimator::UpdateStationary(double yaw_rate_mean) {
 }
 
 StateEstimator::UpdateInfo StateEstimator::Update(const Eigen::Matrix4f& T_meas, double r_scale,
-                                                  const Eigen::Matrix3d& extra_cov) {
+                                                  const Eigen::Matrix3d& extra_cov,
+                                                  bool stationary) {
     UpdateInfo info;
 
     const Eigen::Vector3d z(T_meas(0, 3), T_meas(1, 3), YawOf(T_meas));
-    const Eigen::Vector3d innovation(z(0) - state_(0), z(1) - state_(1), WrapAngle(z(2) - state_(2)));
+    Eigen::Vector3d innovation(z(0) - state_(0), z(1) - state_(1), WrapAngle(z(2) - state_(2)));
+    if (stationary && config_.zupt_freeze_yaw) innovation(2) = 0.0;
 
     // 基準量測雜訊沿行進方向分解：縱向（NDT 退化方向）給較大的不確定度
     const double heading = state_(2) + state_(5);

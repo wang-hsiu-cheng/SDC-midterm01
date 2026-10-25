@@ -6,7 +6,7 @@
     submap_half_size: 40.0
     submap_half_height: 10.0
     min_input_points: 10
-    ply_scale: 8.0               # ⚠ 交接筆記寫 9.0，此處為 8.0，請確認以哪個為準
+    ply_scale: 8.5               # ⚠ 交接筆記寫 9.0，此處為 8.0，請確認以哪個為準
 
     # 相機姿態校正（視為外參：result 會自動補回，輸出的是原始 PLY 座標系位姿）
     camera_pitch_offset: -0.07

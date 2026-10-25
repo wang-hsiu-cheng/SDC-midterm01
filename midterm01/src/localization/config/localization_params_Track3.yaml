@@ -25,6 +25,8 @@
 
     # 第 0 幀初始位姿搜尋（init_guess 航向有雜訊；以 init 與 IMU 姿態航向為中心，由 NDT probability 挑最佳）
     init_search_enabled: true
+    init_search_criterion: probability   # probability｜fitness：第 0 幀挑最佳起點的依據
+    init_search_dump: false       # 診斷：輸出每個起點的結果到 <結果檔>.initsearch.csv
     init_search_yaw_range_deg: 30.0
     init_search_yaw_step_deg: 5.0
     init_search_xy_offsets: [0.0, 2.0, -2.0]   # m，縱向×橫向格狀組合
@@ -67,7 +69,13 @@
     zupt_sigma_speed: 0.02        # m/s
     zupt_sigma_gyro_rate: 0.002   # rad/s
     zupt_freeze_yaw: true         # 靜止時略過 NDT 的 yaw 量測（方案 E）
+    zupt_hold: true               # 靜止時位置不加過程雜訊／P 下限，z 與傾角不混入 NDT（floor 在靜止時會把雜訊灌進位姿）
     fitness_ref: 0.0              # >0 時 fitness 超過此值會放大量測 R
+    conf_r_scale: 1.0             # <1：候選分散度與 fitness 都在下面門檻內時縮小量測 R（方案 C）；1 = 不使用
+    conf_spread_max: 0.8          # m，候選縱向分散度門檻（Track1 四分位約 0.8／1.1／1.5）
+    conf_fitness_max: 0.235       # fitness 門檻（Track1 中位數）
+    floor_sigma_xy: 0.6           # m，P 的 xy 下限，0 = 不設（方案 C）；Track1 前 300 幀掃 0.2–1.0、全長 0.6 最佳（E 1.908→1.733），1.0 變差
+    floor_sigma_yaw_deg: 0.5
     multi_start_lon_offsets: [0.0, 1.5, -1.5, 3.0, -3.0]   # 只有 [0.0] = 單起點
     fusion_probability_power: 4.0 # 候選權重 (p/p_max)^power
     fusion_prior_sigma_lon: 2.0   # 以預測為中心的先驗

@@ -56,11 +56,72 @@ def section_a(d, x, y):
         np.median(nis), nis.mean(), 100 * (d['inflation'][5:] > 1.001).mean()))
     print('   fitness 中位 %.3f（越低越好）；速度前 50 幀中位 %.1f、全程中位 %.1f m/s' % (
         np.median(d['fitness'][5:]), np.median(d['speed'][5:55]), np.median(d['speed'][5:])))
+    if 'final_fitness' in d.dtype.names:
+        ff = d['final_fitness'][5:]
+        ff = ff[ff >= 0]
+        seg = [(a, min(a + 500, len(d))) for a in range(0, len(d), 500)]
+        print('   final_fitness（最終輸出位姿對子地圖，越低越好）中位 %.3f p90 %.3f；每 500 幀中位 %s' % (
+            np.median(ff), np.percentile(ff, 90),
+            ' '.join('%.3f' % np.median(d['final_fitness'][a:b][d['final_fitness'][a:b] >= 0]) for a, b in seg)))
+        yi = d['yaw_minus_imu_deg']
+        print('   位姿 yaw − 陀螺儀自第 0 幀積分（診斷檔，扣第 0 幀零偏）：每 500 幀末 %s deg' % (
+            ' '.join('%+.1f' % yi[min(b, len(d)) - 1] for a, b in seg)))
     b = d['gyro_bias']
     print('   陀螺儀零偏估計 第 10 幀 %+.4f、最後 %+.4f、範圍 [%+.4f, %+.4f] rad/s（靜止窗口的真實值 Track1/3 約 −0.004）' % (
         b[min(10, len(b) - 1)], b[-1], b.min(), b.max()))
     if 'sigma_lon' in d.dtype.names:
         print('   濾波器自認 σ 中位 縱向 %.2f m 橫向 %.2f m' % (np.median(d['sigma_lon'][5:]), np.median(d['sigma_lat'][5:])))
+
+
+def section_d(d, x, y, sig_thr=0.02):
+    """更新離散度：NDT 每幀都提議修正，濾波器是不是只在少數幀才真的採用？（只用診斷檔，不需 GNSS）"""
+    if not all(k in d.dtype.names for k in ('pred_x', 'meas_x')):
+        return
+    n = len(d)
+    applied = np.hypot(x - d['pred_x'], y - d['pred_y'])[1:]
+    proposed = np.hypot(d['meas_x'] - d['pred_x'], d['meas_y'] - d['pred_y'])[1:]
+    sig = np.where(applied >= sig_thr)[0]
+    if len(sig) >= 2:
+        gaps = np.diff(sig)
+        gap_txt = '間隔中位 %d／p90 %d／最大 %d 幀' % (np.median(gaps), np.percentile(gaps, 90), gaps.max())
+    else:
+        gap_txt = '顯著更新少於 2 次'
+    top = np.sort(applied)[::-1][:max(1, len(applied) // 10)].sum() / max(applied.sum(), 1e-12)
+    print('\n== D. 更新離散度（前 %d 幀；顯著更新 = 套用修正 ≥ %.0f cm）' % (n, sig_thr * 100))
+    print('   採用比例（套用修正量總和／NDT 提議量總和）%.3f；顯著更新的幀 %.1f%%（%s）' % (
+        applied.sum() / max(proposed.sum(), 1e-12), 100.0 * len(sig) / len(applied), gap_txt))
+    print('   修正量集中度：最大的 10%% 幀占總修正量 %.0f%%（均勻分布約 10–20%%；越高 = 越像「少數幀才更新」）' % (100 * top))
+
+
+def section_e(result, d, min_len=100):
+    """靜止段（估計速度 < 0.05 m/s 的連續區段）：車停著時位姿該不動。路徑長反映逐幀抖動，淨位移反映累積漂移。"""
+    P = np.loadtxt(result)[:len(d)]
+    R = P[:, [0, 1, 2, 4, 5, 6, 8, 9, 10]].reshape(len(P), 3, 3)
+    still = d['speed'] < 0.05
+    segs, a = [], None
+    for k, f in enumerate(still):
+        if f and a is None:
+            a = k
+        if (not f or k == len(still) - 1) and a is not None:
+            b = k if not f else k + 1
+            if b - a >= min_len:
+                segs.append((a, b))
+            a = None
+    print('\n== E. 靜止段（估計速度 < 0.05 m/s 且連續 ≥ %d 幀）：位姿該不動；路徑長 = 逐幀抖動，淨位移 = 累積漂移' % min_len)
+    if not segs:
+        print('   沒有符合的靜止段')
+        return
+    for a, b in segs:
+        x, y = P[a:b, 3], P[a:b, 7]
+        path = np.hypot(np.diff(x), np.diff(y)).sum()
+        net = math.hypot(x[-1] - x[0], y[-1] - y[0])
+        exc = np.hypot(x - x[0], y - y[0]).max()
+        yaw = np.degrees(np.unwrap(np.arctan2(P[a:b, 4], P[a:b, 0])))
+        pitch = np.degrees(-np.arcsin(np.clip(R[a:b, 2, 0], -1, 1)))
+        roll = np.degrees(np.arctan2(R[a:b, 2, 1], R[a:b, 2, 2]))
+        cosang = np.clip((np.trace(R[a].T @ R[b - 1]) - 1) / 2, -1, 1)
+        print('   幀 %4d-%4d：路徑長 %.2f m、淨位移 %.2f m、最大偏離 %.2f m｜淨旋轉 %.2f deg、yaw 標準差 %.3f deg、roll／pitch 標準差 %.3f／%.3f deg' % (
+            a, b - 1, path, net, exc, math.degrees(math.acos(cosang)), yaw.std(), roll.std(), pitch.std()))
 
 
 def section_b(d, x, y, yaw, ts, gnss_path):
@@ -175,6 +236,8 @@ def main():
     print('result: %s  (%s, %d frames)' % (os.path.basename(result), track, n))
 
     section_a(d, x, y)
+    section_d(d, x, y)
+    section_e(result, d)
     gnss = os.path.join(root, 'ref', 'gnss.csv')
     if os.path.exists(gnss) and sum(1 for _ in open(gnss)) > 2:
         section_b(d, x, y, yaw, ts, gnss)

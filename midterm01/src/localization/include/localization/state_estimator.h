@@ -46,11 +46,19 @@ public:
         double spread_gain = 1.0;            // 候選分散度協方差加進 R 的倍率
         double gate_chi2 = 11.34;            // 3 自由度 99%，超過則按比例放大 R
 
+        // 協方差下限（1-sigma，0 = 不設）：P 在長時間沒有被修正後會塌縮，增益趨近 0，NDT 的修正進不來；
+        // 單純調小 R 而不設下限會讓 σ 過小而局部失控，所以兩者要一起用
+        double floor_sigma_xy = 0.0;         // m
+        double floor_sigma_yaw_deg = 0.0;
+
         // 靜止時的零速／零偏觀測（ZUPT）噪聲
         double zupt_sigma_speed = 0.02;      // m/s
         double zupt_sigma_gyro_rate = 0.002; // rad/s，窗口內陀螺儀均值當零偏觀測
-        double zupt_sigma_accel_bias = 0.01; // m/s^2，窗口內前向加速度均值當加速度零偏觀測（0 = 不觀測）
+        double zupt_sigma_accel_bias = 0.0;  // m/s^2，窗口內前向加速度均值當加速度零偏觀測（0 = 不觀測）
         bool zupt_freeze_yaw = true;         // 靜止時 NDT 的 yaw 量測不進濾波器（停車時 NDT yaw 會殘留緩慢旋轉）
+        // 靜止時鎖定：位置過程雜訊與 P 下限都不作用（濾波器對靜止期間的 NDT 量測做遞減增益的平均，
+        // 不追著每幀雜訊跑；floor 在行駛段有用，但靜止時只會把雜訊灌進位姿），z 與傾角也不再混入 NDT
+        bool zupt_hold = true;
 
         // z / roll / pitch 每幀向 NDT 結果靠攏的比例
         double z_gain = 0.5;
@@ -67,7 +75,8 @@ public:
     // initial_bias：陀螺儀零偏先驗；bias_sigma <= 0 時使用 config 的預設
     void Initialize(const Eigen::Matrix4f& pose, double initial_bias, double bias_sigma);
 
-    void Predict(double dt, double yaw_increment_raw, double forward_accel);
+    // stationary：ZUPT 判定靜止；config.zupt_hold 開啟時位置不加過程雜訊、不套 P 下限
+    void Predict(double dt, double yaw_increment_raw, double forward_accel, bool stationary = false);
 
     // 把濾波器的 yaw 與位姿旋轉 delta（rad），位置不動。yaw 假設銀行用它建立不同航向的假設
     void RotateYaw(double delta);
@@ -75,7 +84,7 @@ public:
     // 靜止（IMU 窗口判定）時的偽量測：速度 = 0、陀螺儀均值 = 零偏、前向加速度均值 = 加速度零偏。不改位姿
     void UpdateStationary(double yaw_rate_mean, double forward_accel_mean);
 
-    // T_meas：NDT 的 T_map_body；r_scale：依配準品質額外放大基準 R；
+    // T_meas：NDT 的 T_map_body；r_scale：基準 R 的倍率（>1 配準品質差而放大，<1 量測有把握而縮小）；
     // extra_cov：量測在 (x, y, yaw) 地圖座標下的額外協方差（例如多起點候選的分散度）
     // stationary：ZUPT 判定靜止；config.zupt_freeze_yaw 開啟時忽略這一幀量測的 yaw
     UpdateInfo Update(const Eigen::Matrix4f& T_meas, double r_scale, const Eigen::Matrix3d& extra_cov,

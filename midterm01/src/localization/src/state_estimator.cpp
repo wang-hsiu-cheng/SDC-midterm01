@@ -39,7 +39,7 @@ void StateEstimator::Initialize(const Eigen::Matrix4f& pose, double initial_bias
     cov_(6, 6) = config_.init_sigma_accel_bias * config_.init_sigma_accel_bias;
 }
 
-void StateEstimator::Predict(double dt, double yaw_increment_raw, double forward_accel) {
+void StateEstimator::Predict(double dt, double yaw_increment_raw, double forward_accel, bool stationary) {
     if (dt <= 0.0) return;
     const double x = state_(0), y = state_(1), psi = state_(2), v = state_(3), b = state_(4), beta = state_(5),
                  ba = state_(6);
@@ -66,7 +66,15 @@ void StateEstimator::Predict(double dt, double yaw_increment_raw, double forward
     Q(4, 4) = std::pow(config_.process_sigma_bias, 2) * dt;
     Q(5, 5) = std::pow(config_.process_sigma_beta, 2) * dt;
     Q(6, 6) = std::pow(config_.process_sigma_accel_bias, 2) * dt;
+    const bool hold = stationary && config_.zupt_hold;
+    if (hold) Q(0, 0) = Q(1, 1) = 0.0;
     cov_ = F * cov_ * F.transpose() + Q;
+    if (!hold) {
+        const double floor_xy = config_.floor_sigma_xy * config_.floor_sigma_xy;
+        const double floor_yaw = std::pow(config_.floor_sigma_yaw_deg * kDeg2Rad, 2);
+        for (const int i : {0, 1}) cov_(i, i) = std::max(cov_(i, i), floor_xy);
+        cov_(2, 2) = std::max(cov_(2, 2), floor_yaw);
+    }
 
     pose_(0, 3) = static_cast<float>(state_(0));
     pose_(1, 3) = static_cast<float>(state_(1));
@@ -116,7 +124,7 @@ StateEstimator::UpdateInfo StateEstimator::Update(const Eigen::Matrix4f& T_meas,
     Eigen::Matrix3d R0 = Eigen::Matrix3d::Zero();
     R0.topLeftCorner<2, 2>() = Rot * body_cov * Rot.transpose();
     R0(2, 2) = std::pow(config_.meas_sigma_yaw_deg * kDeg2Rad, 2);
-    R0 *= std::max(1.0, r_scale);
+    R0 *= r_scale;
     // 候選分散度反映這一幀的實際曖昧程度：候選一致 → 幾乎不加；縱向分歧 → 縱向 R 變大
     R0 += config_.spread_gain * extra_cov;
 
@@ -135,7 +143,10 @@ StateEstimator::UpdateInfo StateEstimator::Update(const Eigen::Matrix4f& T_meas,
     info.inflation = inflation * std::max(1.0, r_scale);
     S = HPHt + R;
 
-    const Eigen::Matrix<double, kStateSize, 3> K = cov_ * H.transpose() * S.inverse();
+    Eigen::Matrix<double, kStateSize, 3> K = cov_ * H.transpose() * S.inverse();
+    // 只把 yaw 創新設 0 不夠：位置創新會透過 yaw 與位置的交叉協方差把 yaw 拉走（靜止時場景有變化，位置創新可達 1 m 以上），
+    // 所以整列 K 歸零；Joseph 形式的協方差更新對任意增益都成立
+    if (stationary && config_.zupt_freeze_yaw) K.row(2).setZero();
     const double yaw_before = state_(2);
     state_ += K * innovation;
     state_(2) = WrapAngle(state_(2));
@@ -155,12 +166,13 @@ StateEstimator::UpdateInfo StateEstimator::Update(const Eigen::Matrix4f& T_meas,
 
     const Eigen::Quaternionf q_pred(Eigen::Matrix3f(predicted.block<3, 3>(0, 0)));
     const Eigen::Quaternionf q_meas(Eigen::Matrix3f(meas_aligned.block<3, 3>(0, 0)));
-    const Eigen::Quaternionf q = q_pred.slerp(static_cast<float>(config_.tilt_gain), q_meas).normalized();
+    const bool hold = stationary && config_.zupt_hold;
+    const Eigen::Quaternionf q = q_pred.slerp(static_cast<float>(hold ? 0.0 : config_.tilt_gain), q_meas).normalized();
 
     pose_.block<3, 3>(0, 0) = q.toRotationMatrix();
     pose_(0, 3) = static_cast<float>(state_(0));
     pose_(1, 3) = static_cast<float>(state_(1));
-    pose_(2, 3) += static_cast<float>(config_.z_gain) * (T_meas(2, 3) - pose_(2, 3));
+    pose_(2, 3) += static_cast<float>(hold ? 0.0 : config_.z_gain) * (T_meas(2, 3) - pose_(2, 3));
     return info;
 }
 

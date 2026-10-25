@@ -7,6 +7,7 @@
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/registration/ndt.h>
 
 namespace localization {
@@ -24,7 +25,11 @@ public:
 
     explicit NdtMatcher(const Config& config);
 
-    void SetTarget(Cloud::ConstPtr target) { ndt_.setInputTarget(target); }
+    void SetTarget(Cloud::ConstPtr target);
+
+    // 把 source 以 pose 變換後，對 target 的最近點平均平方距離（只計 max_range 內的點，與 Align 的 fitness 同定義）。
+    // 不做優化：用來量「最終輸出位姿」和地圖的對齊度（不依賴 GNSS 的評估指標）；沒有 target 或無對應點時回傳 -1
+    double FitnessAt(Cloud::ConstPtr source, const Eigen::Matrix4f& pose, double max_range = 1.0) const;
 
     // T_map_body = Align(source, guess)；fitness 為對應點平均平方距離，僅作配準品質參考；
     // probability 為 NDT 的轉換機率（同一幀不同起點之間可比較，越大越好）
@@ -44,6 +49,8 @@ public:
 
 private:
     pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> ndt_;
+    Cloud::ConstPtr target_;
+    pcl::KdTreeFLANN<pcl::PointXYZ> target_tree_;
 };
 
 }  // namespace localization

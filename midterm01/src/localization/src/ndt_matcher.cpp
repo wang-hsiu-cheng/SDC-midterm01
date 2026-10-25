@@ -9,6 +9,29 @@ NdtMatcher::NdtMatcher(const Config& config) {
     ndt_.setMaximumIterations(config.max_iterations);
 }
 
+void NdtMatcher::SetTarget(Cloud::ConstPtr target) {
+    ndt_.setInputTarget(target);
+    target_ = target;
+    if (target_ && !target_->empty()) target_tree_.setInputCloud(target_);
+}
+
+double NdtMatcher::FitnessAt(Cloud::ConstPtr source, const Eigen::Matrix4f& pose, double max_range) const {
+    if (!target_ || target_->empty() || !source || source->empty()) return -1.0;
+    const double max_sq = max_range * max_range;
+    double sum = 0.0;
+    int count = 0;
+    std::vector<int> index(1);
+    std::vector<float> sq_dist(1);
+    for (const auto& p : source->points) {
+        const Eigen::Vector4f q = pose * Eigen::Vector4f(p.x, p.y, p.z, 1.0f);
+        if (target_tree_.nearestKSearch(pcl::PointXYZ(q.x(), q.y(), q.z()), 1, index, sq_dist) > 0 && sq_dist[0] <= max_sq) {
+            sum += sq_dist[0];
+            ++count;
+        }
+    }
+    return count > 0 ? sum / count : -1.0;
+}
+
 bool NdtMatcher::Align(Cloud::ConstPtr source, const Eigen::Matrix4f& guess, Eigen::Matrix4f& T_map_body,
                        double& fitness, double& probability) {
     Cloud aligned;

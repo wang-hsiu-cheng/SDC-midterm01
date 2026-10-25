@@ -106,11 +106,16 @@ private:
     MapManager::Config map_config_;
     NdtMatcher::Config ndt_config_;
     InitialPoseSearch::Config init_search_config_;
+    bool init_search_dump_ = false;  // 診斷：把第 0 幀搜尋的每個起點結果寫成 <save_file>.initsearch.csv
     MeasurementFusion::Config fusion_config_;
     StateEstimator::Config estimator_config_;
 
     // 配準品質：fitness 超過 ref 時，量測 R 以 (fitness/ref)^2 放大；0 = 不使用
     double fitness_ref_ = 0.0;
+    // 信心縮放：候選縱向分散度 ≤ conf_spread_max 且 fitness ≤ conf_fitness_max 時，基準 R 乘上 conf_r_scale；1 = 不使用
+    double conf_r_scale_ = 1.0;
+    double conf_spread_max_ = 0.0;   // m
+    double conf_fitness_max_ = 0.0;
     // NDT 多起點：沿預測的行進方向平移的偏移量（m），含 0；只有 0 = 單起點
     std::vector<double> multi_start_lon_offsets_{0.0};
     // 起步靜止段估計陀螺儀零偏：樣本數與標準差門檻（超過視為車已在動，改由濾波器在線估計）
@@ -120,7 +125,7 @@ private:
     bool zupt_enabled_ = true;
     int zupt_window_samples_ = 50;
     double zupt_accel_std_max_ = 0.12;       // m/s^2，三軸標準差總和
-    double zupt_accel_mean_max_ = 0.08;      // m/s^2，窗口前向加速度均值與目前加速度零偏的最大差（0 = 不檢查）
+    double zupt_accel_mean_max_ = 0.0;       // m/s^2，窗口前向加速度均值與目前加速度零偏的最大差（0 = 不檢查）
     double zupt_gyro_std_max_ = 0.009;       // rad/s，三軸標準差總和
     double gyro_bias_prior_ = 0.0;           // rad/s
     double bias_prior_sigma_unknown_ = 0.02; // rad/s

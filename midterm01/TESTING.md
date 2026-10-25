@@ -2,6 +2,7 @@
 
 > 給所有要跑定位測試的人與 AI session。重點：**測試用一次性容器跑，不要在 `mid1_container` 裡並行或亂改；每個 run 的參數、輸出、程式版本都要說得清楚**。
 > 2026-10-25 整理，下面的 `docker run` 旗標已實測（見最後一節）。
+> 不想手打這些指令：`src/localization/tools/` 有對應的腳本（`docker_run.sh`、`run_track.sh`、`sweep.sh`、`analyze_diag.py`），用法與驗證狀況見 `src/localization/tools/README.md`。
 
 ## 1. 為什麼要有這份規範
 

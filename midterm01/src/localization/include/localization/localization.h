@@ -24,6 +24,7 @@
 
 #include "localization/imu_processor.h"
 #include "localization/map_manager.h"
+#include "localization/measurement_fusion.h"
 #include "localization/ndt_matcher.h"
 #include "localization/state_estimator.h"
 
@@ -97,8 +98,12 @@ private:
     int min_input_points_ = 10;
     double ply_scale_ = 8.0;
 
+    // 前處理：影像點雲的深度誤差隨距離快速放大；0 = 不限。Track1 實測 20 m 會發散、30 m 小幅改善
+    double input_max_range_ = 0.0;  // m，水平距離
+
     MapManager::Config map_config_;
     NdtMatcher::Config ndt_config_;
+    MeasurementFusion::Config fusion_config_;
     StateEstimator::Config estimator_config_;
 
     // 配準品質：fitness 超過 ref 時，量測 R 以 (fitness/ref)^2 放大；0 = 不使用

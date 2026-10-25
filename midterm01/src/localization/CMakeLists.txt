@@ -33,6 +33,7 @@ add_definitions(${PCL_DEFINITIONS})
 add_library(localization_core
   src/imu_processor.cpp
   src/map_manager.cpp
+  src/measurement_fusion.cpp
   src/ndt_matcher.cpp
   src/state_estimator.cpp
 )

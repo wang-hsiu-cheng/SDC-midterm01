@@ -20,22 +20,16 @@ bool NdtMatcher::Align(Cloud::ConstPtr source, const Eigen::Matrix4f& guess, Eig
     return ndt_.hasConverged() && T_map_body.allFinite();
 }
 
-bool NdtMatcher::AlignMultiStart(Cloud::ConstPtr source, const std::vector<Eigen::Matrix4f>& guesses,
-                                 Eigen::Matrix4f& T_map_body, double& fitness) {
-    bool found = false;
-    double best_probability = -1.0;
+std::vector<NdtMatcher::Candidate> NdtMatcher::AlignAll(Cloud::ConstPtr source,
+                                                       const std::vector<Eigen::Matrix4f>& guesses) {
+    std::vector<Candidate> candidates;
     for (const auto& guess : guesses) {
-        Eigen::Matrix4f result;
-        double candidate_fitness = 0.0, probability = 0.0;
-        if (!Align(source, guess, result, candidate_fitness, probability)) continue;
-        if (!found || probability > best_probability) {
-            found = true;
-            best_probability = probability;
-            T_map_body = result;
-            fitness = candidate_fitness;
+        Candidate candidate;
+        if (Align(source, guess, candidate.pose, candidate.fitness, candidate.probability)) {
+            candidates.push_back(candidate);
         }
     }
-    return found;
+    return candidates;
 }
 
 }  // namespace localization

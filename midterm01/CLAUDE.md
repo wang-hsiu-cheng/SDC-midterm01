@@ -80,10 +80,10 @@ launch 參數：`data_path`、`bag_path`、`ply_path`、`init_guess_file`、`sav
 
 | 路徑 | 職責 | 狀態 |
 |---|---|---|
-| `src/localization.cpp`、`include/localization/localization.h` | 主節點：I/O、主迴圈、publish | I/O 與 publish helper **保留**；scan matching 主迴圈**待重構** |
-| `src/coarse_to_fine_gicp.cpp/.h` | 兩階段 G-ICP | **廢棄，待重構** |
-| `src/motion_predictor.cpp/.h` | 運動先驗（主迴圈沒用到） | **廢棄，待重構** |
-| `src/scale_solver.cpp` | 單幀尺度搜尋小工具 | **廢棄，待重構** |
+| `src/localization.cpp`、`include/localization/localization.h` | 主節點：I/O、流程調度、publish | 已重構 (10/25) |
+| `src/imu_processor.cpp` | 讀 bag 的 IMU，causal 積分（陀螺儀繞上方向、姿態扣重力的前向加速度）、靜止零偏估計 | 新增 |
+| `src/state_estimator.cpp` | 7 狀態 EKF（x,y,yaw,v,陀螺儀零偏,行進偏角,加速度零偏），離群只放大 R 不丟棄 | 新增 |
+| `src/ndt_matcher.cpp`、`src/measurement_fusion.cpp`、`src/map_manager.cpp` | NDT 多起點、候選軟加權＋分散度協方差、子地圖快取 | 新增 |
 | `src/map_modified.cpp` + `launch/map_modified.launch.py` | 地圖 ROI 裁切＋hash 體素降採樣 → binary PCD | 已重構 (10/25) |
 | `src/visualization.cpp` + `launch/visualization.launch.py` + `config/visualization.rviz` | 重播 result.txt＋PLY，話題 `/visual/{map,frame,accumulated,pose,path,reference_path}` | 已重構 (10/25) |
 | `include/localization/ply_sequence.h` | PLY 索引、位姿檔讀取（header-only） | 新增 |

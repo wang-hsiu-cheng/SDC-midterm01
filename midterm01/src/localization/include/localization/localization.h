@@ -114,6 +114,10 @@ private:
     int bias_min_samples_ = 50;
     double bias_max_stddev_ = 0.003;
     // 第 0 幀前靜止樣本不足時（如 Track3 只有 4 個）改用先驗：零偏是感測器常數，Track1 與 Track3 的靜止段都約 −0.004 rad/s
+    bool zupt_enabled_ = true;
+    int zupt_window_samples_ = 50;
+    double zupt_accel_std_max_ = 0.12;       // m/s^2，三軸標準差總和
+    double zupt_gyro_std_max_ = 0.009;       // rad/s，三軸標準差總和
     double gyro_bias_prior_ = 0.0;           // rad/s
     double bias_prior_sigma_unknown_ = 0.02; // rad/s
 

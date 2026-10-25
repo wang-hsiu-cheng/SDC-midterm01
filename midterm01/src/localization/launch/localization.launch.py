@@ -21,6 +21,7 @@ def generate_launch_description():
 
         DeclareLaunchArgument('params_file', default_value='',
                               description='Empty = config/localization_params_<data_path 目錄名>.yaml'),
+        DeclareLaunchArgument('max_frames', default_value='0', description='只處理前 N 幀；0 = 全部'),
         DeclareLaunchArgument('log_level', default_value='info'),
     ]
 
@@ -50,6 +51,7 @@ def generate_launch_description():
                     'init_guess_file': LaunchConfiguration('init_guess_file'),
                     'save_path': LaunchConfiguration('save_path'),
                     'save_file': LaunchConfiguration('save_file'),
+                    'max_frames': ParameterValue(LaunchConfiguration('max_frames'), value_type=int),
                 }
             ],
         )

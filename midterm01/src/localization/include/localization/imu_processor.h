@@ -36,6 +36,10 @@ public:
     // 在 t_ns 以前（含）的樣本中，估計靜止零偏；樣本不足 min_samples 回傳 false。不推進內部游標。
     bool EstimateYawBias(std::int64_t t_ns, int min_samples, double& bias, double& stddev) const;
 
+    // 已推進到的最後 window_samples 個樣本是否靜止（加速度三軸標準差總和與陀螺儀三軸標準差總和皆低於門檻）。
+    // 只用 Advance 已取用的樣本（causal）；靜止時 yaw_rate_mean 為窗口內繞上方向角速度均值（即零偏觀測）。
+    bool IsStationary(int window_samples, double accel_std_max, double gyro_std_max, double& yaw_rate_mean) const;
+
     std::size_t size() const { return samples_.size(); }
 
 private:

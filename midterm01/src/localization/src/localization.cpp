@@ -111,6 +111,10 @@ bool LocalizationApp::LoadParameters() {
     declare_int("bias_min_samples", bias_min_samples_);
     declare_double("bias_max_stddev", bias_max_stddev_);
     declare_double("gyro_bias_prior", gyro_bias_prior_);
+    declare_bool("zupt_enabled", zupt_enabled_);
+    declare_int("zupt_window_samples", zupt_window_samples_);
+    declare_double("zupt_accel_std_max", zupt_accel_std_max_);
+    declare_double("zupt_gyro_std_max", zupt_gyro_std_max_);
     declare_double("bias_prior_sigma_unknown", bias_prior_sigma_unknown_);
 
     auto& e = estimator_config_;
@@ -133,6 +137,8 @@ bool LocalizationApp::LoadParameters() {
     declare_double("meas_sigma_yaw_deg", e.meas_sigma_yaw_deg);
     declare_double("spread_gain", e.spread_gain);
     declare_double("gate_chi2", e.gate_chi2);
+    declare_double("zupt_sigma_speed", e.zupt_sigma_speed);
+    declare_double("zupt_sigma_gyro_rate", e.zupt_sigma_gyro_rate);
     declare_double("fusion_probability_power", fusion_config_.probability_power);
     declare_double("fusion_prior_sigma_lon", fusion_config_.prior_sigma_lon);
     declare_double("fusion_prior_sigma_lat", fusion_config_.prior_sigma_lat);
@@ -337,7 +343,7 @@ bool LocalizationApp::RunLocalization() {
 
     std::int64_t prev_timestamp_ns = 0;
     double bias_sigma = 0.0;  // 0 = 使用 estimator 預設
-    std::size_t processed = 0, skipped_updates = 0;
+    std::size_t processed = 0, skipped_updates = 0, stationary_frames = 0;
     double inflation_sum = 0.0;
     MeasurementFusion fusion(fusion_config_);
 
@@ -358,6 +364,8 @@ bool LocalizationApp::RunLocalization() {
         const ImuInterval imu_interval = imu.Advance(frame.timestamp_ns);
 
         Eigen::Matrix4f guess = init_pose;
+        bool stationary = false;
+        double yaw_rate_mean = 0.0;
         if (first) {
             double bias = 0.0, stddev = 0.0;
             if (imu.EstimateYawBias(frame.timestamp_ns, bias_min_samples_, bias, stddev) && stddev < bias_max_stddev_) {
@@ -372,8 +380,13 @@ bool LocalizationApp::RunLocalization() {
             const double dt = static_cast<double>(frame.timestamp_ns - prev_timestamp_ns) * 1e-9;
             // IMU 覆蓋不足時不信任陀螺儀積分，等同「不轉」（扣掉 bias 後的角速度為 0）
             const bool imu_ok = imu_interval.dt > 0.5 * dt;
+            // 靜止時先把速度與零偏釘住再預測；加速度改用其零偏估計，避免積分出假速度
+            stationary = zupt_enabled_ && imu_ok &&
+                         imu.IsStationary(zupt_window_samples_, zupt_accel_std_max_, zupt_gyro_std_max_, yaw_rate_mean);
+            if (stationary) estimator.UpdateStationary(yaw_rate_mean);
             const double yaw_increment = imu_ok ? imu_interval.yaw_increment : estimator.bias() * dt;
-            estimator.Predict(dt, yaw_increment, imu_ok ? imu_interval.forward_accel : 0.0);
+            const double forward_accel = stationary ? estimator.accel_bias() : (imu_ok ? imu_interval.forward_accel : 0.0);
+            estimator.Predict(dt, yaw_increment, forward_accel);
             guess = estimator.pose();
         }
         prev_timestamp_ns = frame.timestamp_ns;
@@ -415,6 +428,10 @@ bool LocalizationApp::RunLocalization() {
                 }
             }
         }
+        if (stationary) {
+            estimator.UpdateStationary(yaw_rate_mean);
+            ++stationary_frames;
+        }
         if (!converged && !first) ++skipped_updates;
 
         const Eigen::Matrix4f pose = first && !converged ? init_pose : estimator.pose();
@@ -444,8 +461,8 @@ bool LocalizationApp::RunLocalization() {
                         estimator.beta() * 180.0 / M_PI, pose(0, 3), pose(1, 3), fitness, info.inflation, ms);
         }
     }
-    RCLCPP_INFO(node_->get_logger(), "Finished: %zu poses, %zu frames without NDT update, mean R inflation %.2f.",
-                processed, skipped_updates, processed > 1 ? inflation_sum / static_cast<double>(processed - 1) : 1.0);
+    RCLCPP_INFO(node_->get_logger(), "Finished: %zu poses, %zu frames without NDT update, %zu stationary (ZUPT) frames, mean R inflation %.2f.",
+                processed, skipped_updates, stationary_frames, processed > 1 ? inflation_sum / static_cast<double>(processed - 1) : 1.0);
     return processed > 0;
 }
 

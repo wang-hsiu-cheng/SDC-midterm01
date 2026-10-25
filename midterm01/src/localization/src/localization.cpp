@@ -38,7 +38,7 @@ int LocalizationApp::Start(int argc, char** argv) {
         return -1;
     }
     diag_file_.open(output_path.string() + ".diag.csv");
-    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,ply_scale\n";
+    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,ply_scale,floor_scale\n";
 
     if (!IndexPlyFiles(ply_path_) || !LoadMap()) {
         Shutdown();
@@ -170,6 +170,11 @@ bool LocalizationApp::LoadParameters() {
     declare_double("conf_fitness_max", conf_fitness_max_);
     declare_double("floor_sigma_xy", e.floor_sigma_xy);
     declare_double("floor_sigma_yaw_deg", e.floor_sigma_yaw_deg);
+    declare_bool("floor_adaptive", e.floor_adaptive);
+    declare_double("floor_ema_alpha", e.floor_ema_alpha);
+    declare_double("floor_noise_alpha", e.floor_noise_alpha);
+    declare_double("floor_z_low", e.floor_z_low);
+    declare_double("floor_z_high", e.floor_z_high);
     node_->declare_parameter<std::vector<double>>("multi_start_lon_offsets", multi_start_lon_offsets_);
     multi_start_lon_offsets_ = node_->get_parameter("multi_start_lon_offsets").as_double_array();
     if (multi_start_lon_offsets_.empty()) multi_start_lon_offsets_ = {0.0};
@@ -530,7 +535,7 @@ bool LocalizationApp::RunLocalization() {
         diag_file_ << ',' << sigma_lon << ',' << sigma_lat << ',' << sigma_yaw << ',' << spread_lon << ',' << n_eff << ',' << estimator.accel_bias();
         const auto yaw_of = [](const Eigen::Matrix4f& T) { return std::atan2(T(1, 0), T(0, 0)); };
         diag_file_ << ',' << guess(0, 3) << ',' << guess(1, 3) << ',' << yaw_of(guess) << ',' << measured(0, 3) << ','
-                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << scale_estimator.scale() << '\n';
+                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << scale_estimator.scale() << ',' << estimator.floor_scale() << '\n';
         ++processed;
         rclcpp::spin_some(node_);
 

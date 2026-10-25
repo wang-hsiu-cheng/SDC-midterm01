@@ -50,6 +50,13 @@ public:
         // 單純調小 R 而不設下限會讓 σ 過小而局部失控，所以兩者要一起用
         double floor_sigma_xy = 0.0;         // m
         double floor_sigma_yaw_deg = 0.0;
+        // 自適應：floor 對每一幀一視同仁會把 NDT 的逐幀雜訊灌進位姿（軌跡抖動，Kaggle 變差）。
+        // 開啟後只在 NDT 創新有持續偏向（模型落後或漂移）時才啟用 floor：創新的短期平均顯著偏離 0 才開
+        bool floor_adaptive = false;
+        double floor_ema_alpha = 0.1;        // 創新短期平均的係數
+        double floor_noise_alpha = 0.02;     // 創新雜訊（方差）估計的係數
+        double floor_z_low = 2.0;            // 偏向顯著性（短期平均／其標準誤）從 low 到 high，floor 由 0 線性開到全開
+        double floor_z_high = 4.0;
 
         // 靜止時的零速／零偏觀測（ZUPT）噪聲
         double zupt_sigma_speed = 0.02;      // m/s
@@ -90,6 +97,7 @@ public:
     void Sigma(double& lon, double& lat, double& yaw_deg) const;
 
     const Eigen::Matrix4f& pose() const { return pose_; }
+    double floor_scale() const { return floor_scale_xy_; }  // 診斷用：目前 xy 下限的啟用程度（0～1）
     double speed() const { return state_(3); }
     double bias() const { return state_(4); }
     double beta() const { return state_(5); }
@@ -103,6 +111,13 @@ private:
     Vector7 state_ = Vector7::Zero();
     Matrix7 cov_ = Matrix7::Identity();
     Eigen::Matrix4f pose_ = Eigen::Matrix4f::Identity();
+
+    void UpdateFloorScale(const Eigen::Vector3d& innovation, double c, double s);
+
+    Eigen::Vector3d innov_mean_ = Eigen::Vector3d::Zero();  // 車體座標（縱向、橫向、yaw）創新的短期平均
+    Eigen::Vector3d innov_var_ = Eigen::Vector3d::Constant(1.0);
+    double floor_scale_xy_ = 1.0;
+    double floor_scale_yaw_ = 1.0;
 };
 
 }  // namespace localization

@@ -85,6 +85,11 @@
     conf_fitness_max: 0.235       # fitness 門檻（Track1 中位數）
     floor_sigma_xy: 0.6           # m，P 的 xy 下限，0 = 不設（方案 C）；Track1 前 300 幀掃 0.2–1.0、全長 0.6 最佳（E 1.908→1.733），1.0 變差
     floor_sigma_yaw_deg: 0.5
+    floor_adaptive: false         # true：只在 NDT 創新有持續偏向時才啟用 floor（上面兩個值是全開時的下限）
+    floor_ema_alpha: 0.1
+    floor_noise_alpha: 0.02
+    floor_z_low: 2.0
+    floor_z_high: 4.0
     multi_start_lon_offsets: [0.0, 1.5, -1.5, 3.0, -3.0]   # 只有 [0.0] = 單起點
     fusion_probability_power: 4.0 # 候選權重 (p/p_max)^power
     fusion_prior_sigma_lon: 2.0   # 以預測為中心的先驗

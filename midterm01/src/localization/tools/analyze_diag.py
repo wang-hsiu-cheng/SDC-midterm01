@@ -129,6 +129,36 @@ def section_e(result, d, min_len=100):
             a, b - 1, path, net, exc, math.degrees(math.acos(cosang)), yaw.std(), roll.std(), pitch.std()))
 
 
+def section_f(d, x, y, yaw, moving_speed=0.5):
+    """軌跡平滑度（只看行駛中的幀；靜止段由 E 區段負責）：位置二階差（逐幀加速度）、步長的高頻抖動、yaw 逐幀變化。
+
+    為什麼要有這一區：本地 GNSS 只有約 4 Hz、雜訊約 0.7 m，分不出逐幀的抖動，但 Kaggle 的真值精度高，抖動會直接算進誤差。
+    Track1 參考值（全部幀，單位 m／度）：Kaggle 1.56 的版本 加速度中位 0.013／p90 0.034、步長殘差 0.014、yaw 步 std 0.033；
+    floor 0.6 的版本（Kaggle 1.62）0.037／0.098、0.035、0.053。調參時要和 GNSS 的 E 並看，不能只看其中一個。
+    """
+    n = len(x)
+    moving = d['speed'][:n] > moving_speed
+    p = np.stack([x, y], 1)
+    step = np.hypot(*np.diff(p, axis=0).T)                     # n-1
+    acc = np.hypot(*np.diff(p, 2, axis=0).T)                   # n-2
+    ok_step = moving[1:] & moving[:-1]
+    ok_acc = moving[2:] & moving[1:-1] & moving[:-2]
+    if ok_acc.sum() < 30:
+        print('\n== F. 軌跡平滑度：行駛中的幀不足，略過')
+        return
+    kernel = np.ones(11) / 11
+    resid = step - np.convolve(step, kernel, mode='same')
+    ok_resid = ok_step.copy()
+    ok_resid[:5] = False
+    ok_resid[-5:] = False
+    dyaw = np.degrees(np.diff(np.unwrap(yaw)))
+    d2yaw = np.degrees(np.diff(np.unwrap(yaw), 2))
+    print('\n== F. 軌跡平滑度（行駛中 %d 幀；越小越平滑）' % moving.sum())
+    print('   位置加速度（二階差）中位 %.4f／p90 %.4f m/frame²｜步長高頻殘差 std %.4f m｜yaw 逐幀變化 std %.3f deg、二階差 p90 %.3f deg' % (
+        np.median(acc[ok_acc]), np.percentile(acc[ok_acc], 90), resid[ok_resid].std(), dyaw[ok_step].std(),
+        np.percentile(np.abs(d2yaw[ok_acc]), 90)))
+
+
 def section_b(d, x, y, yaw, ts, gnss_path):
     gt, gx, gy, gyaw = E.load_gnss(gnss_path)
     t = (ts - gt[0]).astype(float)
@@ -243,6 +273,7 @@ def main():
     section_a(d, x, y)
     section_d(d, x, y)
     section_e(result, d)
+    section_f(d, x, y, yaw)
     gnss = os.path.join(root, 'ref', 'gnss.csv')
     if os.path.exists(gnss) and sum(1 for _ in open(gnss)) > 2:
         section_b(d, x, y, yaw, ts, gnss)

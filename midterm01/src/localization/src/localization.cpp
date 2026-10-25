@@ -40,6 +40,11 @@ int LocalizationApp::Start(int argc, char** argv) {
     diag_file_.open(output_path.string() + ".diag.csv");
     diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw\n";
 
+    if (yaw_bank_enabled_) {
+        bank_file_.open(output_path.string() + ".bank.csv");
+        bank_file_ << "idx,hyp,offset_deg,fitness,nis,lateral_innov,yaw_innov_deg,yaw_deg,x,y\n";
+    }
+
     if (!IndexPlyFiles(ply_path_) || !LoadMap()) {
         Shutdown();
         return -1;
@@ -121,6 +126,14 @@ bool LocalizationApp::LoadParameters() {
     declare_bool("zupt_enabled", zupt_enabled_);
     declare_int("zupt_window_samples", zupt_window_samples_);
     declare_double("zupt_accel_std_max", zupt_accel_std_max_);
+    declare_double("zupt_accel_mean_max", zupt_accel_mean_max_);
+    declare_bool("yaw_bank_enabled", yaw_bank_enabled_);
+    node_->declare_parameter<std::vector<double>>("yaw_bank_offsets_deg", yaw_bank_offsets_deg_);
+    yaw_bank_offsets_deg_ = node_->get_parameter("yaw_bank_offsets_deg").as_double_array();
+    if (yaw_bank_offsets_deg_.empty()) yaw_bank_offsets_deg_ = {0.0};
+    declare_int("yaw_bank_frames", yaw_bank_frames_);
+    declare_double("yaw_bank_start_speed", yaw_bank_start_speed_);
+    declare_string("yaw_bank_score", yaw_bank_score_);
     declare_double("zupt_gyro_std_max", zupt_gyro_std_max_);
     declare_double("bias_prior_sigma_unknown", bias_prior_sigma_unknown_);
 
@@ -146,6 +159,7 @@ bool LocalizationApp::LoadParameters() {
     declare_double("gate_chi2", e.gate_chi2);
     declare_double("zupt_sigma_speed", e.zupt_sigma_speed);
     declare_double("zupt_sigma_gyro_rate", e.zupt_sigma_gyro_rate);
+    declare_double("zupt_sigma_accel_bias", e.zupt_sigma_accel_bias);
     declare_bool("zupt_freeze_yaw", e.zupt_freeze_yaw);
     declare_double("fusion_probability_power", fusion_config_.probability_power);
     declare_double("fusion_prior_sigma_lon", fusion_config_.prior_sigma_lon);
@@ -372,8 +386,7 @@ bool LocalizationApp::RunLocalization() {
         const ImuInterval imu_interval = imu.Advance(frame.timestamp_ns);
 
         Eigen::Matrix4f guess = init_pose;
-        bool stationary = false;
-        double yaw_rate_mean = 0.0;
+        double yaw_rate_mean = 0.0, forward_accel_mean = 0.0;
         if (first) {
             if (input_ok) {
                 // init_guess 的航向帶雜訊：以 init 與 IMU 姿態航向為中心做多假設 NDT，由地圖匹配挑初值
@@ -401,65 +414,147 @@ bool LocalizationApp::RunLocalization() {
                 estimator.Initialize(init_pose, gyro_bias_prior_, bias_sigma);
                 RCLCPP_WARN(node_->get_logger(), "Not enough static IMU data for bias; using prior %.4f rad/s (sigma %.4f) and estimating online.", gyro_bias_prior_, bias_sigma);
             }
-        } else {
-            const double dt = static_cast<double>(frame.timestamp_ns - prev_timestamp_ns) * 1e-9;
-            // IMU 覆蓋不足時不信任陀螺儀積分，等同「不轉」（扣掉 bias 後的角速度為 0）
-            const bool imu_ok = imu_interval.dt > 0.5 * dt;
-            // 靜止時先把速度與零偏釘住再預測；加速度改用其零偏估計，避免積分出假速度
-            stationary = zupt_enabled_ && imu_ok &&
-                         imu.IsStationary(zupt_window_samples_, zupt_accel_std_max_, zupt_gyro_std_max_, yaw_rate_mean);
-            if (stationary) estimator.UpdateStationary(yaw_rate_mean);
-            const double yaw_increment = imu_ok ? imu_interval.yaw_increment : estimator.bias() * dt;
-            const double forward_accel = stationary ? estimator.accel_bias() : (imu_ok ? imu_interval.forward_accel : 0.0);
-            estimator.Predict(dt, yaw_increment, forward_accel);
-            guess = estimator.pose();
         }
+        const double dt = first ? 0.0 : static_cast<double>(frame.timestamp_ns - prev_timestamp_ns) * 1e-9;
         prev_timestamp_ns = frame.timestamp_ns;
 
-        if (map_manager.Update(guess.block<3, 1>(0, 3))) matcher.SetTarget(map_manager.submap());
-
-        bool converged = false;
-        double fitness = -1.0;
-        StateEstimator::UpdateInfo info;
-        Eigen::Matrix4f measured = guess;  // 診斷用：NDT 量測（未收斂時等於預測）
-        double spread_lon = 0.0, n_eff = 0.0;
-        if (input_ok && !map_manager.submap()->empty()) {
-            std::vector<Eigen::Matrix4f> starts;
-            const Eigen::Vector3f forward(std::cos(static_cast<float>(estimator.yaw())),
-                                          std::sin(static_cast<float>(estimator.yaw())), 0.0f);
-            for (const double offset : multi_start_lon_offsets_) {
-                Eigen::Matrix4f start = guess;
-                start.block<3, 1>(0, 3) += static_cast<float>(offset) * forward;
-                starts.push_back(start);
+        // 對單一濾波器做「預測 → NDT → 更新」；yaw 假設銀行啟用時，每個假設各跑一次
+        struct StepResult {
+            Eigen::Matrix4f guess = Eigen::Matrix4f::Identity();
+            Eigen::Matrix4f measured = Eigen::Matrix4f::Identity();
+            StateEstimator::UpdateInfo info;
+            bool stationary = false;
+            bool converged = false;
+            double fitness = -1.0, spread_lon = 0.0, n_eff = 0.0;
+        };
+        const auto step = [&](StateEstimator& est) {
+            StepResult r;
+            r.guess = first ? init_pose : est.pose();
+            if (!first) {
+                // IMU 覆蓋不足時不信任陀螺儀積分，等同「不轉」（扣掉 bias 後的角速度為 0）
+                const bool imu_ok = imu_interval.dt > 0.5 * dt;
+                // 靜止時先把速度與零偏釘住再預測；加速度改用其零偏估計，避免積分出假速度
+                r.stationary = zupt_enabled_ && imu_ok &&
+                               imu.IsStationary(zupt_window_samples_, zupt_accel_std_max_, zupt_gyro_std_max_,
+                                                yaw_rate_mean, forward_accel_mean);
+                // 以穩定的小加速度起步時窗口標準差也很小，只看標準差會把起步誤判成靜止，並把真實加速度當成零偏
+                if (r.stationary && zupt_accel_mean_max_ > 0.0 &&
+                    std::abs(forward_accel_mean - est.accel_bias()) > zupt_accel_mean_max_) {
+                    r.stationary = false;
+                }
+                if (r.stationary) est.UpdateStationary(yaw_rate_mean, forward_accel_mean);
+                const double yaw_increment = imu_ok ? imu_interval.yaw_increment : est.bias() * dt;
+                const double forward_accel = r.stationary ? est.accel_bias() : (imu_ok ? imu_interval.forward_accel : 0.0);
+                est.Predict(dt, yaw_increment, forward_accel);
+                r.guess = est.pose();
             }
-            const auto candidates = matcher.AlignAll(input, starts);
-            converged = !candidates.empty();
-            if (converged) {
-                // 軟加權合併候選，並以候選分散度當這一幀量測的不確定度
-                const auto merged = fusion.Merge(candidates, guess);
-                measured = merged.pose;
-                fitness = merged.fitness;
-                n_eff = merged.effective_candidates;
-                const Eigen::Vector2d heading(std::cos(estimator.yaw()), std::sin(estimator.yaw()));
-                spread_lon = std::sqrt(std::max(0.0, heading.dot(merged.spread_cov.topLeftCorner<2, 2>() * heading)));
-                if (first) {
-                    // 第 0 幀：init_guess 帶雜訊，直接以 NDT 結果作為濾波器初值
-                    estimator.Initialize(merged.pose, estimator.bias(), bias_sigma);
-                } else {
-                    const double r_scale = (fitness_ref_ > 0.0 && fitness > fitness_ref_)
-                                               ? std::pow(fitness / fitness_ref_, 2) : 1.0;
-                    info = estimator.Update(merged.pose, r_scale, merged.spread_cov, stationary);
-                    inflation_sum += info.inflation;
+            r.measured = r.guess;  // 診斷用：NDT 量測（未收斂時等於預測）
+
+            if (map_manager.Update(r.guess.block<3, 1>(0, 3))) matcher.SetTarget(map_manager.submap());
+            if (input_ok && !map_manager.submap()->empty()) {
+                std::vector<Eigen::Matrix4f> starts;
+                const Eigen::Vector3f forward(std::cos(static_cast<float>(est.yaw())),
+                                              std::sin(static_cast<float>(est.yaw())), 0.0f);
+                for (const double offset : multi_start_lon_offsets_) {
+                    Eigen::Matrix4f start = r.guess;
+                    start.block<3, 1>(0, 3) += static_cast<float>(offset) * forward;
+                    starts.push_back(start);
+                }
+                const auto candidates = matcher.AlignAll(input, starts);
+                r.converged = !candidates.empty();
+                if (r.converged) {
+                    // 軟加權合併候選，並以候選分散度當這一幀量測的不確定度
+                    const auto merged = fusion.Merge(candidates, r.guess);
+                    r.measured = merged.pose;
+                    r.fitness = merged.fitness;
+                    r.n_eff = merged.effective_candidates;
+                    const Eigen::Vector2d heading(std::cos(est.yaw()), std::sin(est.yaw()));
+                    r.spread_lon = std::sqrt(std::max(0.0, heading.dot(merged.spread_cov.topLeftCorner<2, 2>() * heading)));
+                    if (first) {
+                        // 第 0 幀：init_guess 帶雜訊，直接以 NDT 結果作為濾波器初值
+                        est.Initialize(merged.pose, est.bias(), bias_sigma);
+                    } else {
+                        const double r_scale = (fitness_ref_ > 0.0 && r.fitness > fitness_ref_)
+                                                   ? std::pow(r.fitness / fitness_ref_, 2) : 1.0;
+                        r.info = est.Update(merged.pose, r_scale, merged.spread_cov, r.stationary);
+                    }
                 }
             }
+            if (r.stationary) est.UpdateStationary(yaw_rate_mean, forward_accel_mean);
+            return r;
+        };
+
+        StepResult result;
+        std::size_t shown_index = 0;
+        if (yaw_bank_.active) {
+            // 銀行階段：同一份 IMU／點雲，各 yaw 假設各自追蹤；累積指標，輸出目前最佳者（逐幀決定，仍 causal）
+            std::vector<StepResult> results;
+            for (std::size_t k = 0; k < yaw_bank_.members.size(); ++k) {
+                auto& member = yaw_bank_.members[k];
+                results.push_back(step(member.estimator));
+                const StepResult& r = results.back();
+                const double yaw_k = member.estimator.yaw();
+                const double dx = r.measured(0, 3) - r.guess(0, 3), dy = r.measured(1, 3) - r.guess(1, 3);
+                const double lateral = -std::sin(yaw_k) * dx + std::cos(yaw_k) * dy;
+                const double yaw_innov = StateEstimator::WrapAngle(
+                    std::atan2(r.measured(1, 0), r.measured(0, 0)) - std::atan2(r.guess(1, 0), r.guess(0, 0)));
+                if (r.converged) {
+                    member.fitness_sum += r.fitness;
+                    member.nis_sum += r.info.mahalanobis_sq;
+                    member.lateral_abs_sum += std::abs(lateral);
+                    member.yaw_abs_sum += std::abs(yaw_innov);
+                    ++member.count;
+                }
+                const Eigen::Matrix4f p_k = member.estimator.pose();
+                bank_file_ << processed << ',' << k << ',' << member.offset_deg << ',' << r.fitness << ','
+                           << r.info.mahalanobis_sq << ',' << lateral << ',' << yaw_innov * 180.0 / M_PI << ','
+                           << std::atan2(p_k(1, 0), p_k(0, 0)) * 180.0 / M_PI << ',' << p_k(0, 3) << ',' << p_k(1, 3) << '\n';
+            }
+            shown_index = yaw_bank_.BestIndex(yaw_bank_score_);
+            result = results[shown_index];
+            ++yaw_bank_.frames;
+        } else {
+            result = step(estimator);
         }
-        if (stationary) {
-            estimator.UpdateStationary(yaw_rate_mean);
-            ++stationary_frames;
+        // 承諾：保留分數最佳的假設，丟掉其餘
+        const StateEstimator* shown_ptr = yaw_bank_.active ? &yaw_bank_.members[shown_index].estimator : &estimator;
+        if (yaw_bank_.active && yaw_bank_.frames >= yaw_bank_frames_) {
+            RCLCPP_INFO(node_->get_logger(), "Yaw bank committed after %d frames: offset %+.1f deg (score %s).",
+                        yaw_bank_.frames, yaw_bank_.members[shown_index].offset_deg, yaw_bank_score_.c_str());
+            estimator = yaw_bank_.members[shown_index].estimator;
+            yaw_bank_.active = false;
+            yaw_bank_.done = true;
+            yaw_bank_.members.clear();
+            shown_ptr = &estimator;
+        } else if (yaw_bank_.active) {
+            shown_ptr = &yaw_bank_.members[shown_index].estimator;
         }
+        const StateEstimator& shown = *shown_ptr;
+        const Eigen::Matrix4f guess_out = result.guess;
+        const bool converged = result.converged;
+        const double fitness = result.fitness;
+        const StateEstimator::UpdateInfo info = result.info;
+        const Eigen::Matrix4f measured = result.measured;
+        if (converged && !first) inflation_sum += info.inflation;
+        if (result.stationary) ++stationary_frames;
         if (!converged && !first) ++skipped_updates;
 
-        const Eigen::Matrix4f pose = first && !converged ? init_pose : estimator.pose();
+        // 車開始移動才建立 yaw 假設銀行：靜止時沒有視差，單幀的 NDT 對 yaw 沒有鑑別力
+        if (yaw_bank_enabled_ && !yaw_bank_.active && !yaw_bank_.done && !first && !result.stationary &&
+            estimator.speed() > yaw_bank_start_speed_) {
+            yaw_bank_.members.clear();
+            yaw_bank_.frames = 0;
+            for (const double offset_deg : yaw_bank_offsets_deg_) {
+                YawBank::Member member{estimator, offset_deg};
+                member.estimator.RotateYaw(offset_deg * M_PI / 180.0);
+                yaw_bank_.members.push_back(member);
+            }
+            yaw_bank_.active = true;
+            RCLCPP_INFO(node_->get_logger(), "Yaw bank started at frame %zu with %zu hypotheses.", processed,
+                        yaw_bank_.members.size());
+        }
+
+        const Eigen::Matrix4f pose = first && !converged ? init_pose : shown.pose();
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 
         if (publish_frames_) {
@@ -468,13 +563,13 @@ bool LocalizationApp::RunLocalization() {
         }
         WritePose(pose);
         diag_file_ << processed << ',' << converged << ',' << fitness << ',' << info.mahalanobis_sq << ','
-                   << info.inflation << ',' << estimator.speed() << ',' << estimator.bias() << ','
-                   << estimator.beta() * 180.0 / M_PI << ',' << imu_interval.sample_count << ',' << ms;
+                   << info.inflation << ',' << shown.speed() << ',' << shown.bias() << ','
+                   << shown.beta() * 180.0 / M_PI << ',' << imu_interval.sample_count << ',' << ms;
         double sigma_lon = 0.0, sigma_lat = 0.0, sigma_yaw = 0.0;
-        estimator.Sigma(sigma_lon, sigma_lat, sigma_yaw);
-        diag_file_ << ',' << sigma_lon << ',' << sigma_lat << ',' << sigma_yaw << ',' << spread_lon << ',' << n_eff << ',' << estimator.accel_bias();
+        shown.Sigma(sigma_lon, sigma_lat, sigma_yaw);
+        diag_file_ << ',' << sigma_lon << ',' << sigma_lat << ',' << sigma_yaw << ',' << result.spread_lon << ',' << result.n_eff << ',' << shown.accel_bias();
         const auto yaw_of = [](const Eigen::Matrix4f& T) { return std::atan2(T(1, 0), T(0, 0)); };
-        diag_file_ << ',' << guess(0, 3) << ',' << guess(1, 3) << ',' << yaw_of(guess) << ',' << measured(0, 3) << ','
+        diag_file_ << ',' << guess_out(0, 3) << ',' << guess_out(1, 3) << ',' << yaw_of(guess_out) << ',' << measured(0, 3) << ','
                    << measured(1, 3) << ',' << yaw_of(measured) << '\n';
         ++processed;
         rclcpp::spin_some(node_);
@@ -482,8 +577,8 @@ bool LocalizationApp::RunLocalization() {
         if (processed == 1 || processed % 100 == 0) {
             RCLCPP_INFO(node_->get_logger(),
                         "Frame %zu/%zu: v=%.2fm/s bias=%+.4f ba=%+.3f beta=%+.2fdeg pose=(%.1f, %.1f) fit=%.3f infl=%.1f ms=%.0f",
-                        processed, ply_frames_.size(), estimator.speed(), estimator.bias(), estimator.accel_bias(),
-                        estimator.beta() * 180.0 / M_PI, pose(0, 3), pose(1, 3), fitness, info.inflation, ms);
+                        processed, ply_frames_.size(), shown.speed(), shown.bias(), shown.accel_bias(),
+                        shown.beta() * 180.0 / M_PI, pose(0, 3), pose(1, 3), fitness, info.inflation, ms);
         }
     }
     RCLCPP_INFO(node_->get_logger(), "Finished: %zu poses, %zu frames without NDT update, %zu stationary (ZUPT) frames, mean R inflation %.2f.",

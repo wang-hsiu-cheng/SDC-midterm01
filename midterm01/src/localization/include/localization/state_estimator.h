@@ -49,6 +49,7 @@ public:
         // 靜止時的零速／零偏觀測（ZUPT）噪聲
         double zupt_sigma_speed = 0.02;      // m/s
         double zupt_sigma_gyro_rate = 0.002; // rad/s，窗口內陀螺儀均值當零偏觀測
+        double zupt_sigma_accel_bias = 0.01; // m/s^2，窗口內前向加速度均值當加速度零偏觀測（0 = 不觀測）
         bool zupt_freeze_yaw = true;         // 靜止時 NDT 的 yaw 量測不進濾波器（停車時 NDT yaw 會殘留緩慢旋轉）
 
         // z / roll / pitch 每幀向 NDT 結果靠攏的比例
@@ -68,8 +69,11 @@ public:
 
     void Predict(double dt, double yaw_increment_raw, double forward_accel);
 
-    // 靜止（IMU 窗口判定）時的偽量測：速度 = 0、陀螺儀均值 = 零偏。不改位姿
-    void UpdateStationary(double yaw_rate_mean);
+    // 把濾波器的 yaw 與位姿旋轉 delta（rad），位置不動。yaw 假設銀行用它建立不同航向的假設
+    void RotateYaw(double delta);
+
+    // 靜止（IMU 窗口判定）時的偽量測：速度 = 0、陀螺儀均值 = 零偏、前向加速度均值 = 加速度零偏。不改位姿
+    void UpdateStationary(double yaw_rate_mean, double forward_accel_mean);
 
     // T_meas：NDT 的 T_map_body；r_scale：依配準品質額外放大基準 R；
     // extra_cov：量測在 (x, y, yaw) 地圖座標下的額外協方差（例如多起點候選的分散度）

@@ -37,8 +37,10 @@ public:
     bool EstimateYawBias(std::int64_t t_ns, int min_samples, double& bias, double& stddev) const;
 
     // 已推進到的最後 window_samples 個樣本是否靜止（加速度三軸標準差總和與陀螺儀三軸標準差總和皆低於門檻）。
-    // 只用 Advance 已取用的樣本（causal）；靜止時 yaw_rate_mean 為窗口內繞上方向角速度均值（即零偏觀測）。
-    bool IsStationary(int window_samples, double accel_std_max, double gyro_std_max, double& yaw_rate_mean) const;
+    // 只用 Advance 已取用的樣本（causal）；靜止時 yaw_rate_mean 為窗口內繞上方向角速度均值（即零偏觀測），
+    // forward_accel_mean 為窗口內扣重力後的前向加速度均值（真值為 0，剩下的就是加速度零偏）。
+    bool IsStationary(int window_samples, double accel_std_max, double gyro_std_max, double& yaw_rate_mean,
+                      double& forward_accel_mean) const;
 
     // 已推進到的最後一個樣本的姿態航向（body x 軸在 IMU 世界座標的 yaw，rad）；尚未取用任何樣本回傳 false。
     // 只用 Advance 已取用的樣本（causal）。

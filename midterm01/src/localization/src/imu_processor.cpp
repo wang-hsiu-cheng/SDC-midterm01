@@ -91,18 +91,21 @@ bool ImuProcessor::LatestHeading(double& yaw) const {
 }
 
 bool ImuProcessor::IsStationary(int window_samples, double accel_std_max, double gyro_std_max,
-                                double& yaw_rate_mean) const {
+                                double& yaw_rate_mean, double& forward_accel_mean) const {
+    constexpr double kGravity = 9.81;
     if (window_samples < 2 || cursor_ < static_cast<std::size_t>(window_samples)) return false;
     Eigen::Vector3d accel_sum = Eigen::Vector3d::Zero(), accel_sq = Eigen::Vector3d::Zero();
     Eigen::Vector3d gyro_sum = Eigen::Vector3d::Zero(), gyro_sq = Eigen::Vector3d::Zero();
-    double yaw_rate_sum = 0.0;
+    double yaw_rate_sum = 0.0, forward_sum = 0.0;
     for (std::size_t i = cursor_ - window_samples; i < cursor_; ++i) {
         const ImuSample& s = samples_[i];
         accel_sum += s.accel;
         accel_sq += s.accel.cwiseAbs2();
         gyro_sum += s.gyro;
         gyro_sq += s.gyro.cwiseAbs2();
-        yaw_rate_sum += s.gyro.dot(s.orientation.conjugate() * Eigen::Vector3d::UnitZ());
+        const Eigen::Vector3d up = s.orientation.conjugate() * Eigen::Vector3d::UnitZ();
+        yaw_rate_sum += s.gyro.dot(up);
+        forward_sum += (s.accel - kGravity * up).x();
     }
     const double n = window_samples;
     const auto total_std = [n](const Eigen::Vector3d& sum, const Eigen::Vector3d& sq) {
@@ -111,6 +114,7 @@ bool ImuProcessor::IsStationary(int window_samples, double accel_std_max, double
     };
     if (total_std(accel_sum, accel_sq) > accel_std_max || total_std(gyro_sum, gyro_sq) > gyro_std_max) return false;
     yaw_rate_mean = yaw_rate_sum / n;
+    forward_accel_mean = forward_sum / n;
     return true;
 }
 

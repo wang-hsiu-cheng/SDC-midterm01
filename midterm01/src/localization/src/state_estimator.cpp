@@ -73,7 +73,12 @@ void StateEstimator::Predict(double dt, double yaw_increment_raw, double forward
     ApplyYawDelta(pose_, dpsi);
 }
 
-void StateEstimator::UpdateStationary(double yaw_rate_mean) {
+void StateEstimator::RotateYaw(double delta) {
+    state_(2) = WrapAngle(state_(2) + delta);
+    ApplyYawDelta(pose_, delta);
+}
+
+void StateEstimator::UpdateStationary(double yaw_rate_mean, double forward_accel_mean) {
     const auto scalar_update = [this](int index, double z, double sigma) {
         const double innovation = z - state_(index);
         const double s = cov_(index, index) + sigma * sigma;
@@ -85,6 +90,8 @@ void StateEstimator::UpdateStationary(double yaw_rate_mean) {
     };
     scalar_update(3, 0.0, config_.zupt_sigma_speed);
     scalar_update(4, yaw_rate_mean, config_.zupt_sigma_gyro_rate);
+    // 靜止時真實前向加速度為 0，量到的均值就是（重力洩漏＋感測器）零偏；不觀測的話 ba 只能被 NDT 縱向創新帶偏
+    if (config_.zupt_sigma_accel_bias > 0.0) scalar_update(6, forward_accel_mean, config_.zupt_sigma_accel_bias);
     state_(2) = WrapAngle(state_(2));
     state_(3) = std::clamp(state_(3), 0.0, config_.max_speed);
 }

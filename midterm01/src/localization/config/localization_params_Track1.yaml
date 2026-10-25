@@ -34,6 +34,7 @@
     gyro_bias_prior: -0.004       # rad/s，靜止樣本不足時的先驗（感測器常數；Track1／Track3 靜止段皆約 −0.004）
     zupt_enabled: true            # IMU 窗口判定靜止時釘住速度與零偏（等紅燈不累積位移、yaw 不漂）
     zupt_window_samples: 50       # 約 0.5 s
+    zupt_accel_mean_max: 0.08     # m/s^2，窗口前向加速度均值偏離 ba 超過此值 = 正在加減速，不是靜止（防止起步被誤判成靜止）
     zupt_accel_std_max: 0.12      # m/s^2，窗口內加速度三軸標準差總和（靜止 <0.09，行駛／起步 >0.2）
     zupt_gyro_std_max: 0.009      # rad/s，陀螺儀三軸標準差總和（靜止 <0.006，行駛／起步 >0.007）
     bias_prior_sigma_unknown: 0.003
@@ -64,6 +65,13 @@
     gate_chi2: 11.34
     zupt_sigma_speed: 0.02        # m/s
     zupt_sigma_gyro_rate: 0.002   # rad/s
+    zupt_sigma_accel_bias: 0.01   # m/s^2，靜止窗口前向加速度均值當 ba 觀測（純 IMU 積分的速度很準，濾波器的速度損失來自 ba 被 NDT 帶偏）
+    # 初始 yaw 假設銀行：車起步後對多個 yaw 假設各跑一份濾波器，累積指標後承諾最佳者（預設關閉）
+    yaw_bank_enabled: false
+    yaw_bank_offsets_deg: [0.0]   # 相對起步時濾波器 yaw 的偏移（度）
+    yaw_bank_frames: 150
+    yaw_bank_start_speed: 0.3     # m/s
+    yaw_bank_score: fitness       # fitness｜nis｜lateral｜yaw
     zupt_freeze_yaw: true         # 靜止時略過 NDT 的 yaw 量測（方案 E）
     fitness_ref: 0.0              # >0 時 fitness 超過此值會放大量測 R
     multi_start_lon_offsets: [0.0, 1.5, -1.5, 3.0, -3.0]   # 只有 [0.0] = 單起點

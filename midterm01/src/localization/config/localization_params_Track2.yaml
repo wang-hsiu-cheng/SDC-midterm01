@@ -1,14 +1,15 @@
 # Track2 專用參數（完整獨立的一份；launch 依 data_path 的目錄名選用 localization_params_<Track名>.yaml）。
 # ⚠ 三個 track 的 yaml 大多相同；改共用參數時要三份一起改，改完用 tools/diff_params.py 檢查差異是否只剩刻意的部分。
-# Track2 尚未下載、未驗證：暫用 Track1 的設定。下載後請先用 GNSS 本地評估掃描 ply_scale
-# （Track1 上 8.0→8.5 讓縱向偏差變了約 3 m）。
+# Track2 專用設定（10/26 驗證，見 STATUS.md「Track2 初始化與發散診斷」）：
+# 尺度 8.5–9.0 為穩定帶（8.0／8.3 發散），取中央 8.7；初始 yaw 改由起步後的 yaw 假設銀行決定（用 fitness 打分），
+# 並釘住 beta（Track2 起步時 beta 會被量測雜訊推到 30°）、收緊加速度零偏的過程雜訊。
 /**:
   ros__parameters:
     # 點雲與地圖前處理
     map_voxel_leaf_size: 1.0
     input_voxel_leaf_size: 0.5
     min_input_points: 10
-    ply_scale: 8.0
+    ply_scale: 8.7
     input_max_range: 30.0         # m（水平距離），0 = 不限；⚠ 20 會發散（Track1），勿再調小
 
     # 子地圖（只在車輛移動超過 recrop 距離時重切）
@@ -23,7 +24,7 @@
     ndt_max_iterations: 35
 
     # 第 0 幀初始位姿搜尋（init_guess 航向有雜訊；以 init 與 IMU 姿態航向為中心，由 NDT probability 挑最佳）
-    init_search_enabled: true
+    init_search_enabled: false    # 第 0 幀車靜止，NDT 對 yaw 沒有鑑別力（單幀搜尋是雜訊）；改由 yaw 假設銀行決定
     init_search_yaw_range_deg: 30.0
     init_search_yaw_step_deg: 5.0
     init_search_xy_offsets: [0.0, 2.0, -2.0]   # m，縱向×橫向格狀組合
@@ -35,6 +36,7 @@
     gyro_bias_prior: -0.004       # rad/s，靜止樣本不足時的先驗（感測器常數；Track1／Track3 靜止段皆約 −0.004）
     zupt_enabled: true            # IMU 窗口判定靜止時釘住速度與零偏（等紅燈不累積位移、yaw 不漂）
     zupt_window_samples: 50       # 約 0.5 s
+    zupt_accel_mean_max: 0.08     # m/s^2，窗口前向加速度均值偏離 ba 超過此值 = 正在加減速，不是靜止（防止起步被誤判成靜止）
     zupt_accel_std_max: 0.12      # m/s^2，窗口內加速度三軸標準差總和（靜止 <0.09，行駛／起步 >0.2）
     zupt_gyro_std_max: 0.009      # rad/s，陀螺儀三軸標準差總和（靜止 <0.006，行駛／起步 >0.007）
     bias_prior_sigma_unknown: 0.003
@@ -44,14 +46,14 @@
     init_sigma_yaw_deg: 3.0
     init_sigma_speed: 3.0
     init_sigma_bias: 0.002
-    init_sigma_beta_deg: 3.0
+    init_sigma_beta_deg: 0.01     # 釘住 beta：Track2 起步時 beta 會被推到 +30°，Track1／3 全程 ±2°
     init_sigma_accel_bias: 0.05
     process_sigma_xy: 0.05
     process_sigma_yaw: 0.005
     process_sigma_speed: 0.1      # ⚠ 調到 0.6 會發散（Track1），勿放大
     process_sigma_bias: 1.0e-4
-    process_sigma_beta: 1.0e-3
-    process_sigma_accel_bias: 0.01
+    process_sigma_beta: 1.0e-6
+    process_sigma_accel_bias: 0.002  # 加速度零偏漂到 0.1–0.5 m/s² 會讓速度掉到 0（純 IMU 積分的速度本來很準）
     accel_gain: 1.0               # 前向線加速度（IMU 姿態扣重力後）進預測；0 = 不使用
     max_speed: 40.0
 
@@ -65,6 +67,13 @@
     gate_chi2: 11.34
     zupt_sigma_speed: 0.02        # m/s
     zupt_sigma_gyro_rate: 0.002   # rad/s
+    zupt_sigma_accel_bias: 0.01   # m/s^2，靜止窗口前向加速度均值當 ba 觀測（純 IMU 積分的速度很準，濾波器的速度損失來自 ba 被 NDT 帶偏）
+    # 初始 yaw 假設銀行：車起步後對多個 yaw 假設各跑一份濾波器，累積指標後承諾最佳者（預設關閉）
+    yaw_bank_enabled: true
+    yaw_bank_offsets_deg: [-10.0, -5.0, 0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0]   # 相對起步時濾波器 yaw 的偏移（度）；init_guess 在 Track2 的 yaw 偏差約 15°
+    yaw_bank_frames: 150
+    yaw_bank_start_speed: 1.0     # m/s，要確實在移動才有視差（0.3 會在靜止的速度雜訊上誤啟動）
+    yaw_bank_score: fitness       # fitness｜nis｜lateral｜yaw
     zupt_freeze_yaw: true         # 靜止時略過 NDT 的 yaw 量測（方案 E）
     fitness_ref: 0.0              # >0 時 fitness 超過此值會放大量測 R
     multi_start_lon_offsets: [0.0, 1.5, -1.5, 3.0, -3.0]   # 只有 [0.0] = 單起點

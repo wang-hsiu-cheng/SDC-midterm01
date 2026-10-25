@@ -73,6 +73,8 @@ python3 src/localization/tools/eval_ate.py src/localization/result/Track1_result
 
 launch 參數：`data_path`、`bag_path`、`ply_path`、`init_guess_file`、`save_path`、`save_file`、`params_file`、`log_level`。每個 track 一份完整的參數檔：`config/localization_params_Track1.yaml`、`_Track2.yaml`、`_Track3.yaml`（launch 依 `data_path` 的目錄名選用，找不到會報錯；也可用 `params_file:=<path>` 指定）。三份大多相同，目前只有 `ply_scale` 不同（Track1/2 為 8.5、Track3 為 7.5）；改共用參數時三份一起改，改完用 `python3 src/localization/tools/diff_params.py` 檢查差異是否只剩刻意的部分。直接用 `ros2 run` 時要自己加 `--params-file`。
 
+跑測試、並行 sweep、背景執行與容器隔離的規範見 `TESTING.md`（**跑任何測試前先讀**）。
+
 ---
 
 ## 3. 目錄地圖（`src/localization/`）
@@ -121,6 +123,10 @@ launch 參數：`data_path`、`bag_path`、`ply_path`、`init_guess_file`、`sav
 7. git：commit/push 前先問使用者；commit message 沿用 `feature:` / `fix:` / `modify:` 前綴。
 8. 會耗時的完整 run 用背景執行，log 保留在 `log/` 或 scratchpad，不要塞進對話。
 9. 報告需要「原創貢獻」：重要的設計決策與失敗嘗試都記進 `STATUS.md`，之後寫報告時使用。
+10. **跑測試／並行 sweep 用一次性容器**（`docker run --rm`，旗標與範例見 `TESTING.md`），不要在 `mid1_container` 裡並行跑或同時 build：它是 host 網路，且與 master 共用 `build/`、`install/`、`result/`。
+11. **每個 run 的輸出檔名唯一**（`<Track>_<標籤>.txt`），不要用 launch 預設的正式結果檔名；同一批比較的 run，差異只能來自列出的 `-p` 覆寫。
+12. sweep 進行中不要 build 同一個 workspace；要比較不同程式版本就用各自的 git worktree；**一個 worktree 同時只有一個寫入者**。
+13. 引用結果時在 `STATUS.md` 寫下 commit（或「工作區未提交」）、track yaml、`-p` 覆寫與幀數；被中斷的 run（行數少於 PLY 幀數）不是結果，不要 commit。
 
 ---
 

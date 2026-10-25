@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""診斷一次定位結果（<Track>_<標籤>.txt 與同名的 .diag.csv）：誤差從哪裡來？NDT 提出的修正有沒有被濾波器採用？
+
+用法：python3 analyze_diag.py <result.txt> [--max-frames N] [--data DIR]
+Track 由檔名開頭（Track1_…）推得；資料目錄預設為主 repo 的 data/（與 sdc_env.sh 相同）。
+有資料才印的三個區塊：
+  A 診斷檔本身（任何 track，含沒有 GNSS 的 Track3）
+  B GNSS 參考（Track1/2，ref/gnss.csv；GNSS 只作離線評估，不進演算法）：預測／NDT 量測／最終位姿的誤差、修正效率、累積段
+  C IMU yaw 一致性（有 ref/imu.csv，由 tools/extract_bag.py 產生）：位姿 yaw 的變化對照扣零偏的陀螺儀積分，
+    不需要 GNSS 就能看出航向是否被拉歪（Track3 初始航向偏差就是這樣發現的）
+"""
+import argparse
+import math
+import os
+import re
+import subprocess
+import sys
+
+import numpy as np
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import eval_ate as E  # noqa: E402  讀結果、PLY 時間戳、GNSS 的共用函式
+
+
+def data_root(explicit):
+    if explicit:
+        return explicit
+    common = subprocess.run(['git', 'rev-parse', '--git-common-dir'], cwd=HERE, capture_output=True, text=True,
+                            check=True).stdout.strip()
+    return os.path.join(os.path.dirname(os.path.abspath(os.path.join(HERE, common))), 'data')
+
+
+def acf_time(x, thr=math.exp(-1)):
+    x = x - x.mean()
+    v = float(np.dot(x, x))
+    for k in range(1, min(600, len(x) - 1)):
+        if np.dot(x[:-k], x[k:]) / v < thr:
+            return k
+    return 600
+
+
+def section_a(d, x, y):
+    print('== A. 診斷檔（NDT 提議 vs 實際套用）  frames %d' % len(d))
+    have_pm = all(k in d.dtype.names for k in ('pred_x', 'meas_x'))
+    if have_pm:
+        proposed = np.hypot(d['meas_x'] - d['pred_x'], d['meas_y'] - d['pred_y'])
+        applied = np.hypot(x - d['pred_x'], y - d['pred_y'])
+        print('   NDT 與預測的位置差 |meas-pred|  中位 %.3f m  p90 %.3f m  max %.2f m' % (
+            np.median(proposed), np.percentile(proposed, 90), proposed.max()))
+        print('   實際套用的修正 |final-pred|     中位 %.4f m  p90 %.3f m  修正 >5 cm 的幀 %.1f%%（套用比例約 %.0f%%）' % (
+            np.median(applied), np.percentile(applied, 90), 100 * (applied > 0.05).mean(),
+            100 * np.median(applied) / max(np.median(proposed), 1e-9)))
+    nis = d['mahalanobis_sq'][5:]
+    print('   NIS 中位 %.2f 平均 %.2f（χ²₃ 期望 2.37／3.0）；R 被放大的幀 %.1f%%' % (
+        np.median(nis), nis.mean(), 100 * (d['inflation'][5:] > 1.001).mean()))
+    print('   fitness 中位 %.3f（越低越好）；速度前 50 幀中位 %.1f、全程中位 %.1f m/s' % (
+        np.median(d['fitness'][5:]), np.median(d['speed'][5:55]), np.median(d['speed'][5:])))
+    b = d['gyro_bias']
+    print('   陀螺儀零偏估計 第 10 幀 %+.4f、最後 %+.4f、範圍 [%+.4f, %+.4f] rad/s（靜止窗口的真實值 Track1/3 約 −0.004）' % (
+        b[min(10, len(b) - 1)], b[-1], b.min(), b.max()))
+    if 'sigma_lon' in d.dtype.names:
+        print('   濾波器自認 σ 中位 縱向 %.2f m 橫向 %.2f m' % (np.median(d['sigma_lon'][5:]), np.median(d['sigma_lat'][5:])))
+
+
+def section_b(d, x, y, yaw, ts, gnss_path):
+    gt, gx, gy, gyaw = E.load_gnss(gnss_path)
+    t = (ts - gt[0]).astype(float)
+    tg = (gt - gt[0]).astype(float)
+    rx, ry, ryaw = [np.interp(t, tg, v) for v in (gx, gy, gyaw)]
+    valid = (ts >= gt[0]) & (ts <= gt[-1])
+
+    def err(px, py, pyaw):
+        ex, ey = px - rx, py - ry
+        return np.array([ex * np.cos(ryaw) + ey * np.sin(ryaw), -ex * np.sin(ryaw) + ey * np.cos(ryaw),
+                         np.degrees((pyaw - ryaw + np.pi) % (2 * np.pi) - np.pi)])
+
+    fin = err(x, y, yaw)
+    print('\n== B. GNSS 參考（僅離線評估；GNSS 參考本身有約 0.5 m 安裝偏移與取樣雜訊，絕對值只能看相對）')
+    if not all(k in d.dtype.names for k in ('pred_x', 'meas_x')):
+        print('   診斷檔沒有 pred/meas 欄位，只報最終誤差')
+        for i, nm in enumerate(('縱向', '橫向', 'yaw')):
+            print('   %s final rms %.2f %s' % (nm, np.sqrt(np.mean(fin[i][valid] ** 2)), 'deg' if i == 2 else 'm'))
+        return
+    pred = err(d['pred_x'], d['pred_y'], d['pred_yaw'])
+    meas = err(d['meas_x'], d['meas_y'], d['meas_yaw'])
+    m = valid.copy()
+    m[:2] = False
+    for i, nm in enumerate(('縱向', '橫向', 'yaw')):
+        u = 'deg' if i == 2 else 'm'
+        need, did = -pred[i][m], fin[i][m] - pred[i][m]
+        eff = np.polyfit(need, did, 1)[0]
+        eff_ndt = np.polyfit(need, meas[i][m] - pred[i][m], 1)[0]
+        print('   %s rms：預測 %.2f  NDT 量測 %.2f  最終 %.2f %s ｜修正效率（1＝完全修正）濾波器套用 %.2f、NDT 單獨 %.2f' % (
+            nm, np.sqrt(np.mean(pred[i][m] ** 2)), np.sqrt(np.mean(meas[i][m] ** 2)), np.sqrt(np.mean(fin[i][m] ** 2)), u,
+            eff, eff_ndt))
+    inn = (meas - pred)[:, m]
+    print('   NDT 創新（量測−預測）去相關時間 縱向 %d 橫向 %d 幀' % (acf_time(inn[0]), acf_time(inn[1])))
+    lon = fin[0]
+    for thr in (1.0, 1.5):
+        big = (np.abs(lon) > thr) & valid
+        starts = [i for i in np.where(big)[0] if i == 0 or not big[i - 1]]
+        durs = []
+        for s0 in starts:
+            e = s0
+            while e < len(big) and big[e]:
+                e += 1
+            durs.append(e - s0)
+        if durs:
+            print('   |縱向誤差|>%.1f m：%.0f%% 的幀、%d 段，持續時間中位 %d／最長 %d 幀' % (
+                thr, 100 * big[valid].mean(), len(durs), np.median(durs), max(durs)))
+        else:
+            print('   |縱向誤差|>%.1f m：無' % thr)
+    r = np.hypot(fin[0], fin[1])[valid]
+    e_total = math.sqrt(np.mean(r ** 2)) + 0.2 * math.sqrt(np.mean(fin[2][valid] ** 2))
+    print('   Kaggle 公式 E（GNSS 參考）= %.3f  （rmse_p %.3f、yaw %.2f deg、%d 幀）' % (
+        e_total, math.sqrt(np.mean(r ** 2)), math.sqrt(np.mean(fin[2][valid] ** 2)), valid.sum()))
+
+
+def section_c(yaw, ts, imu_path):
+    im = np.genfromtxt(imu_path, delimiter=',', names=True)
+    t = (im['stamp_ns'] - ts[0]) * 1e-9
+    qx, qy, qz, qw = im['qx'], im['qy'], im['qz'], im['qw']
+    up = np.stack([2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx ** 2 + qy ** 2)], 1)  # 世界上方向在 IMU 座標系
+    wup = (np.stack([im['wx'], im['wy'], im['wz']], 1) * up).sum(1)
+    dt = np.diff(t, prepend=t[0])
+    # 零偏：取陀螺儀最安靜的 10 s 窗口（車停著）的平均；僅作離線診斷，演算法不使用未來資料
+    w = 1000
+    if len(wup) > 2 * w:
+        csum, csq = np.cumsum(np.insert(wup, 0, 0)), np.cumsum(np.insert(wup ** 2, 0, 0))
+        mean = (csum[w:] - csum[:-w]) / w
+        var = (csq[w:] - csq[:-w]) / w - mean ** 2
+        k = int(np.argmin(var))
+        bias, std = float(mean[k]), float(math.sqrt(max(var[k], 0)))
+        where = '約 %.0f–%.0f s' % (t[k], t[k + w])
+    else:
+        bias, std, where = float(np.median(wup)), float('nan'), '全程中位數'
+    imu_yaw = np.degrees(np.cumsum((wup - bias) * dt))
+    tf = (ts - ts[0]) * 1e-9
+    imu_at = np.interp(tf, t, imu_yaw)
+    pose = np.degrees(np.unwrap(yaw))
+    diff = (pose - pose[0]) - imu_at
+    print('\n== C. IMU yaw 一致性（扣零偏的陀螺儀積分，零偏 %+.4f rad/s 取自最安靜窗口 %s，std %.4f）' % (bias, where, std))
+    print('   幀    t(s)  位姿yaw變化  IMU yaw變化  差(位姿−IMU)')
+    for k in np.unique(np.linspace(0, len(yaw) - 1, 9).astype(int)):
+        print('   %4d %6.1f  %+9.1f  %+9.1f  %+9.2f' % (k, tf[k], pose[k] - pose[0], imu_at[k], diff[k]))
+    print('   差的 rms %.1f deg、最大 %.1f deg（第 %d 幀）。差持續增大 = 位姿航向與陀螺儀矛盾（初始航向偏差、尺度不對或 NDT yaw 被拉歪）' % (
+        math.sqrt(np.mean(diff ** 2)), np.abs(diff).max(), int(np.abs(diff).argmax())))
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('result')
+    ap.add_argument('--max-frames', type=int, default=0)
+    ap.add_argument('--data', help='資料目錄（含 Track1/2/3）；預設主 repo 的 data/')
+    args = ap.parse_args()
+
+    result = os.path.abspath(args.result)
+    m = re.match(r'(Track\d+)', os.path.basename(result))
+    if not m:
+        sys.exit('檔名要以 TrackN 開頭（例如 Track1_try1.txt），才能找到對應的資料')
+    track = m.group(1)
+    root = os.path.join(data_root(args.data), track)
+    diag_path = result + '.diag.csv'
+    if not os.path.exists(diag_path):
+        sys.exit('找不到診斷檔 ' + diag_path)
+
+    x, y, yaw = E.load_result(result)
+    d = np.genfromtxt(diag_path, delimiter=',', names=True, invalid_raise=False)
+    n = min(len(x), len(d))
+    if args.max_frames:
+        n = min(n, args.max_frames)
+    x, y, yaw, d = x[:n], y[:n], yaw[:n], d[:n]
+    ts = E.ply_timestamps(os.path.join(root, 'raw_ply'))[:n]
+    print('result: %s  (%s, %d frames)' % (os.path.basename(result), track, n))
+
+    section_a(d, x, y)
+    gnss = os.path.join(root, 'ref', 'gnss.csv')
+    if os.path.exists(gnss) and sum(1 for _ in open(gnss)) > 2:
+        section_b(d, x, y, yaw, ts, gnss)
+    else:
+        print('\n== B. 略過：%s 沒有可用的 GNSS 參考（Track3 本來就沒有；Track2 要先用 extract_bag.py 匯出 gnss.csv）' % track)
+    imu = os.path.join(root, 'ref', 'imu.csv')
+    if os.path.exists(imu):
+        section_c(yaw, ts, imu)
+    else:
+        print('\n== C. 略過：沒有 %s；先執行 tools/extract_bag.py %s/%s.db3 %s/ref' % (imu, root, track, root))
+
+
+if __name__ == '__main__':
+    main()

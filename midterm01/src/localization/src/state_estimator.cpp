@@ -73,6 +73,22 @@ void StateEstimator::Predict(double dt, double yaw_increment_raw, double forward
     ApplyYawDelta(pose_, dpsi);
 }
 
+void StateEstimator::UpdateStationary(double yaw_rate_mean) {
+    const auto scalar_update = [this](int index, double z, double sigma) {
+        const double innovation = z - state_(index);
+        const double s = cov_(index, index) + sigma * sigma;
+        const Vector7 k = cov_.col(index) / s;
+        state_ += k * innovation;
+        const Matrix7 I_KH = Matrix7::Identity() - k * Matrix7::Identity().row(index);
+        cov_ = I_KH * cov_ * I_KH.transpose() + k * (sigma * sigma) * k.transpose();
+        cov_ = 0.5 * (cov_ + cov_.transpose());
+    };
+    scalar_update(3, 0.0, config_.zupt_sigma_speed);
+    scalar_update(4, yaw_rate_mean, config_.zupt_sigma_gyro_rate);
+    state_(2) = WrapAngle(state_(2));
+    state_(3) = std::clamp(state_(3), 0.0, config_.max_speed);
+}
+
 StateEstimator::UpdateInfo StateEstimator::Update(const Eigen::Matrix4f& T_meas, double r_scale,
                                                   const Eigen::Matrix3d& extra_cov) {
     UpdateInfo info;

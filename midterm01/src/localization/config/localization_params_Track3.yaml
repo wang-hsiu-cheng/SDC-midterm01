@@ -28,6 +28,10 @@
     bias_min_samples: 50          # 第 0 幀前至少這麼多 IMU 樣本才估計靜止零偏
     bias_max_stddev: 0.003        # rad/s，超過視為車已在動
     gyro_bias_prior: -0.004       # rad/s，靜止樣本不足時的先驗（感測器常數；Track1／Track3 靜止段皆約 −0.004）
+    zupt_enabled: true            # IMU 窗口判定靜止時釘住速度與零偏（等紅燈不累積位移、yaw 不漂）
+    zupt_window_samples: 50       # 約 0.5 s
+    zupt_accel_std_max: 0.12      # m/s^2，窗口內加速度三軸標準差總和（靜止 <0.09，行駛／起步 >0.2）
+    zupt_gyro_std_max: 0.009      # rad/s，陀螺儀三軸標準差總和（靜止 <0.006，行駛／起步 >0.007）
     bias_prior_sigma_unknown: 0.003
 
     # EKF 初始不確定度與過程雜訊
@@ -54,6 +58,8 @@
     meas_sigma_yaw_deg: 2.0
     spread_gain: 1.0              # 多起點候選分散度加進量測 R 的倍率
     gate_chi2: 11.34
+    zupt_sigma_speed: 0.02        # m/s
+    zupt_sigma_gyro_rate: 0.002   # rad/s
     fitness_ref: 0.0              # >0 時 fitness 超過此值會放大量測 R
     multi_start_lon_offsets: [0.0, 1.5, -1.5, 3.0, -3.0]   # 只有 [0.0] = 單起點
     fusion_probability_power: 4.0 # 候選權重 (p/p_max)^power

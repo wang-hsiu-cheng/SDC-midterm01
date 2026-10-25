@@ -46,6 +46,10 @@ public:
         double spread_gain = 1.0;            // 候選分散度協方差加進 R 的倍率
         double gate_chi2 = 11.34;            // 3 自由度 99%，超過則按比例放大 R
 
+        // 靜止時的零速／零偏觀測（ZUPT）噪聲
+        double zupt_sigma_speed = 0.02;      // m/s
+        double zupt_sigma_gyro_rate = 0.002; // rad/s，窗口內陀螺儀均值當零偏觀測
+
         // z / roll / pitch 每幀向 NDT 結果靠攏的比例
         double z_gain = 0.5;
         double tilt_gain = 0.5;
@@ -62,6 +66,9 @@ public:
     void Initialize(const Eigen::Matrix4f& pose, double initial_bias, double bias_sigma);
 
     void Predict(double dt, double yaw_increment_raw, double forward_accel);
+
+    // 靜止（IMU 窗口判定）時的偽量測：速度 = 0、陀螺儀均值 = 零偏。不改位姿
+    void UpdateStationary(double yaw_rate_mean);
 
     // T_meas：NDT 的 T_map_body；r_scale：依配準品質額外放大基準 R；
     // extra_cov：量測在 (x, y, yaw) 地圖座標下的額外協方差（例如多起點候選的分散度）

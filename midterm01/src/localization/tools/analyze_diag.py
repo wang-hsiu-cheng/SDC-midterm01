@@ -93,6 +93,37 @@ def section_d(d, x, y, sig_thr=0.02):
     print('   修正量集中度：最大的 10%% 幀占總修正量 %.0f%%（均勻分布約 10–20%%；越高 = 越像「少數幀才更新」）' % (100 * top))
 
 
+def section_e(result, d, min_len=100):
+    """靜止段（估計速度 < 0.05 m/s 的連續區段）：車停著時位姿該不動。路徑長反映逐幀抖動，淨位移反映累積漂移。"""
+    P = np.loadtxt(result)[:len(d)]
+    R = P[:, [0, 1, 2, 4, 5, 6, 8, 9, 10]].reshape(len(P), 3, 3)
+    still = d['speed'] < 0.05
+    segs, a = [], None
+    for k, f in enumerate(still):
+        if f and a is None:
+            a = k
+        if (not f or k == len(still) - 1) and a is not None:
+            b = k if not f else k + 1
+            if b - a >= min_len:
+                segs.append((a, b))
+            a = None
+    print('\n== E. 靜止段（估計速度 < 0.05 m/s 且連續 ≥ %d 幀）：位姿該不動；路徑長 = 逐幀抖動，淨位移 = 累積漂移' % min_len)
+    if not segs:
+        print('   沒有符合的靜止段')
+        return
+    for a, b in segs:
+        x, y = P[a:b, 3], P[a:b, 7]
+        path = np.hypot(np.diff(x), np.diff(y)).sum()
+        net = math.hypot(x[-1] - x[0], y[-1] - y[0])
+        exc = np.hypot(x - x[0], y - y[0]).max()
+        yaw = np.degrees(np.unwrap(np.arctan2(P[a:b, 4], P[a:b, 0])))
+        pitch = np.degrees(-np.arcsin(np.clip(R[a:b, 2, 0], -1, 1)))
+        roll = np.degrees(np.arctan2(R[a:b, 2, 1], R[a:b, 2, 2]))
+        cosang = np.clip((np.trace(R[a].T @ R[b - 1]) - 1) / 2, -1, 1)
+        print('   幀 %4d-%4d：路徑長 %.2f m、淨位移 %.2f m、最大偏離 %.2f m｜淨旋轉 %.2f deg、yaw 標準差 %.3f deg、roll／pitch 標準差 %.3f／%.3f deg' % (
+            a, b - 1, path, net, exc, math.degrees(math.acos(cosang)), yaw.std(), roll.std(), pitch.std()))
+
+
 def section_b(d, x, y, yaw, ts, gnss_path):
     gt, gx, gy, gyaw = E.load_gnss(gnss_path)
     t = (ts - gt[0]).astype(float)
@@ -206,6 +237,7 @@ def main():
 
     section_a(d, x, y)
     section_d(d, x, y)
+    section_e(result, d)
     gnss = os.path.join(root, 'ref', 'gnss.csv')
     if os.path.exists(gnss) and sum(1 for _ in open(gnss)) > 2:
         section_b(d, x, y, yaw, ts, gnss)

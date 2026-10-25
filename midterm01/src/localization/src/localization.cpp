@@ -149,6 +149,7 @@ bool LocalizationApp::LoadParameters() {
     declare_double("zupt_sigma_speed", e.zupt_sigma_speed);
     declare_double("zupt_sigma_gyro_rate", e.zupt_sigma_gyro_rate);
     declare_bool("zupt_freeze_yaw", e.zupt_freeze_yaw);
+    declare_bool("zupt_hold", e.zupt_hold);
     declare_double("fusion_probability_power", fusion_config_.probability_power);
     declare_double("fusion_prior_sigma_lon", fusion_config_.prior_sigma_lon);
     declare_double("fusion_prior_sigma_lat", fusion_config_.prior_sigma_lat);
@@ -428,7 +429,7 @@ bool LocalizationApp::RunLocalization() {
             if (stationary) estimator.UpdateStationary(yaw_rate_mean);
             const double yaw_increment = imu_ok ? imu_interval.yaw_increment : estimator.bias() * dt;
             const double forward_accel = stationary ? estimator.accel_bias() : (imu_ok ? imu_interval.forward_accel : 0.0);
-            estimator.Predict(dt, yaw_increment, forward_accel);
+            estimator.Predict(dt, yaw_increment, forward_accel, stationary);
             guess = estimator.pose();
         }
         if (!first) {

@@ -55,6 +55,9 @@ public:
         double zupt_sigma_speed = 0.02;      // m/s
         double zupt_sigma_gyro_rate = 0.002; // rad/s，窗口內陀螺儀均值當零偏觀測
         bool zupt_freeze_yaw = true;         // 靜止時 NDT 的 yaw 量測不進濾波器（停車時 NDT yaw 會殘留緩慢旋轉）
+        // 靜止時鎖定：位置過程雜訊與 P 下限都不作用（濾波器對靜止期間的 NDT 量測做遞減增益的平均，
+        // 不追著每幀雜訊跑；floor 在行駛段有用，但靜止時只會把雜訊灌進位姿），z 與傾角也不再混入 NDT
+        bool zupt_hold = true;
 
         // z / roll / pitch 每幀向 NDT 結果靠攏的比例
         double z_gain = 0.5;
@@ -71,7 +74,8 @@ public:
     // initial_bias：陀螺儀零偏先驗；bias_sigma <= 0 時使用 config 的預設
     void Initialize(const Eigen::Matrix4f& pose, double initial_bias, double bias_sigma);
 
-    void Predict(double dt, double yaw_increment_raw, double forward_accel);
+    // stationary：ZUPT 判定靜止；config.zupt_hold 開啟時位置不加過程雜訊、不套 P 下限
+    void Predict(double dt, double yaw_increment_raw, double forward_accel, bool stationary = false);
 
     // 靜止（IMU 窗口判定）時的偽量測：速度 = 0、陀螺儀均值 = 零偏。不改位姿
     void UpdateStationary(double yaw_rate_mean);

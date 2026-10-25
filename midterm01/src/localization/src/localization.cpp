@@ -38,7 +38,7 @@ int LocalizationApp::Start(int argc, char** argv) {
         return -1;
     }
     diag_file_.open(output_path.string() + ".diag.csv");
-    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw\n";
+    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg\n";
 
     if (!IndexPlyFiles(ply_path_) || !LoadMap()) {
         Shutdown();
@@ -353,6 +353,8 @@ bool LocalizationApp::RunLocalization() {
     double bias_sigma = 0.0;  // 0 = 使用 estimator 預設
     std::size_t processed = 0, skipped_updates = 0, stationary_frames = 0;
     double inflation_sum = 0.0;
+    // 診斷用：只靠陀螺儀（扣第 0 幀零偏）從第 0 幀位姿積分出的 yaw，用來對照最終位姿 yaw；不進濾波器
+    double imu_yaw_ref = 0.0, imu_ref_bias = 0.0;
     MeasurementFusion fusion(fusion_config_);
 
     for (const auto& frame : ply_frames_) {
@@ -414,6 +416,10 @@ bool LocalizationApp::RunLocalization() {
             estimator.Predict(dt, yaw_increment, forward_accel);
             guess = estimator.pose();
         }
+        if (!first) {
+            const double dt_ref = static_cast<double>(frame.timestamp_ns - prev_timestamp_ns) * 1e-9;
+            if (imu_interval.dt > 0.5 * dt_ref) imu_yaw_ref += imu_interval.yaw_increment - imu_ref_bias * imu_interval.dt;
+        }
         prev_timestamp_ns = frame.timestamp_ns;
 
         if (map_manager.Update(guess.block<3, 1>(0, 3))) matcher.SetTarget(map_manager.submap());
@@ -467,6 +473,12 @@ bool LocalizationApp::RunLocalization() {
             PublishFrame(input, color, map_manager.submap(), pose, frame.timestamp_ns);
         }
         WritePose(pose);
+        if (first) {
+            imu_yaw_ref = std::atan2(pose(1, 0), pose(0, 0));
+            imu_ref_bias = estimator.bias();
+        }
+        const double final_fitness = input_ok ? matcher.FitnessAt(input, pose) : -1.0;
+        const double yaw_minus_imu = StateEstimator::WrapAngle(std::atan2(pose(1, 0), pose(0, 0)) - imu_yaw_ref);
         diag_file_ << processed << ',' << converged << ',' << fitness << ',' << info.mahalanobis_sq << ','
                    << info.inflation << ',' << estimator.speed() << ',' << estimator.bias() << ','
                    << estimator.beta() * 180.0 / M_PI << ',' << imu_interval.sample_count << ',' << ms;
@@ -475,7 +487,7 @@ bool LocalizationApp::RunLocalization() {
         diag_file_ << ',' << sigma_lon << ',' << sigma_lat << ',' << sigma_yaw << ',' << spread_lon << ',' << n_eff << ',' << estimator.accel_bias();
         const auto yaw_of = [](const Eigen::Matrix4f& T) { return std::atan2(T(1, 0), T(0, 0)); };
         diag_file_ << ',' << guess(0, 3) << ',' << guess(1, 3) << ',' << yaw_of(guess) << ',' << measured(0, 3) << ','
-                   << measured(1, 3) << ',' << yaw_of(measured) << '\n';
+                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << '\n';
         ++processed;
         rclcpp::spin_some(node_);
 

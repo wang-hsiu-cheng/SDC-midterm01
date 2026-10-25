@@ -56,6 +56,16 @@ def section_a(d, x, y):
         np.median(nis), nis.mean(), 100 * (d['inflation'][5:] > 1.001).mean()))
     print('   fitness 中位 %.3f（越低越好）；速度前 50 幀中位 %.1f、全程中位 %.1f m/s' % (
         np.median(d['fitness'][5:]), np.median(d['speed'][5:55]), np.median(d['speed'][5:])))
+    if 'final_fitness' in d.dtype.names:
+        ff = d['final_fitness'][5:]
+        ff = ff[ff >= 0]
+        seg = [(a, min(a + 500, len(d))) for a in range(0, len(d), 500)]
+        print('   final_fitness（最終輸出位姿對子地圖，越低越好）中位 %.3f p90 %.3f；每 500 幀中位 %s' % (
+            np.median(ff), np.percentile(ff, 90),
+            ' '.join('%.3f' % np.median(d['final_fitness'][a:b][d['final_fitness'][a:b] >= 0]) for a, b in seg)))
+        yi = d['yaw_minus_imu_deg']
+        print('   位姿 yaw − 陀螺儀自第 0 幀積分（診斷檔，扣第 0 幀零偏）：每 500 幀末 %s deg' % (
+            ' '.join('%+.1f' % yi[min(b, len(d)) - 1] for a, b in seg)))
     b = d['gyro_bias']
     print('   陀螺儀零偏估計 第 10 幀 %+.4f、最後 %+.4f、範圍 [%+.4f, %+.4f] rad/s（靜止窗口的真實值 Track1/3 約 −0.004）' % (
         b[min(10, len(b) - 1)], b[-1], b.min(), b.max()))

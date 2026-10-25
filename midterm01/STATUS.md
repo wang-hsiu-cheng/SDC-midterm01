@@ -51,7 +51,7 @@
 **已知問題**
 - ~~`map_modified` 小 leaf 時 PCL VoxelGrid 溢位~~ → 10/25 已重寫為 hash 體素降採樣（1 m 結果與舊版逐點一致 496,909 點；0.5 m = 1,796,100 點）
 - `localization.launch.py` 的 `bag_path` 預設寫死 `Track1.db3`
-- `txt_to_idx_x_y_yaw.py` import 了 `savgol_filter`/`gaussian_filter1d`（未使用，但有違規疑慮，須移除）
+- ~~`txt_to_idx_x_y_yaw.py` import 了 `savgol_filter`/`gaussian_filter1d`~~ → 10/25 已移除未使用的第三方 import（腳本現在只做格式轉換，且不依賴 pandas/scipy）
 - `result/` 內現有結果（Track1 98 行、Track3 31 行）都是不完整的舊 run，不具參考價值
 
 ## 4. 目標架構（重構藍圖）
@@ -85,7 +85,7 @@ IMU ─────────────────────────�
 - [x] bag 讀取：`tools/extract_bag.py` → `data/TrackN/ref/{imu,gnss}.csv`（Track3 無 GNSS）
 - [x] `tools/eval_ate.py`：GNSS 參考軌跡＋Kaggle 公式（時間插值、yaw wrap）
 - [x] 評估 G-ICP 是否取代 NDT（`matcher_bench`，見 §7）→ **結論：不採用 PCL G-ICP 取代 NDT**
-- [ ] 移除 `txt_to_idx_x_y_yaw.py` 的平滑 import
+- [x] 移除 `txt_to_idx_x_y_yaw.py` 未使用的 pandas／numpy／scipy（含平滑函式）import（原本在無這些套件的環境無法執行）
 - [x] launch 的 `bag_path` 預設改為 `<data_path>/<目錄名>.db3`
 
 ### P1 — 10/26 重構骨架＋第一版跑通

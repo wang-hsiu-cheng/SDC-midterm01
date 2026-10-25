@@ -48,7 +48,7 @@ def create_node(context):
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('data_path', default_value='/root/data/Track1', description='Track 目錄'),
+        DeclareLaunchArgument('data_path', default_value='/root/data/Track3', description='Track 目錄'),
         DeclareLaunchArgument('input_file', default_value='', description='原始地圖；留空 = <data_path>/map.pcd'),
         DeclareLaunchArgument('output_file', default_value='', description='輸出；留空 = 依 leaf 自動命名'),
         DeclareLaunchArgument('voxel_leaf_size', default_value='1.0', description='體素大小 (m)，0 = 不降採樣'),

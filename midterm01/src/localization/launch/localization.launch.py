@@ -12,13 +12,13 @@ def generate_launch_description():
     pkg_share = get_package_share_directory('localization')
     default_params_file = os.path.join(pkg_share, 'config', 'localization_params.yaml')
     arguments = [
-        DeclareLaunchArgument('data_path', default_value='/root/data/Track1', description='Track directory'),
+        DeclareLaunchArgument('data_path', default_value='/root/data/Track3', description='Track directory'),
         DeclareLaunchArgument('bag_path', default_value='', description='Empty = <data_path>/<track dir name>.db3'),
         DeclareLaunchArgument('ply_path', default_value=PathJoinSubstitution([LaunchConfiguration('data_path'), 'raw_ply'])),
         DeclareLaunchArgument('init_guess_file', default_value=PathJoinSubstitution([LaunchConfiguration('data_path'), 'init_guess.txt'])),
 
         DeclareLaunchArgument('save_path', default_value='/root/midterm/src/localization/result/'),
-        DeclareLaunchArgument('save_file', default_value='Track1_result.txt'),
+        DeclareLaunchArgument('save_file', default_value='Track3_result.txt'),
 
         DeclareLaunchArgument('params_file', default_value=default_params_file, description='Path to yaml parameters file'),
         DeclareLaunchArgument('log_level', default_value='info'),

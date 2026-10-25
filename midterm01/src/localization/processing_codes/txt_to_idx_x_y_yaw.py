@@ -27,5 +27,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     txt_to_csv(args.input, args.output)
 
-# python3 txt_to_idx_x_y_yaw.py /root/midterm/src/localization/result/track1_result.txt /root/midterm/src/localization/result/kaggle_track1_result.csv
-# python3 txt_to_idx_x_y_yaw.py /root/midterm/src/localization/result/track2_result.txt /root/midterm/src/localization/result/kaggle_track2_result.csv
+# python3 /root/midterm/src/localization/processing_codes/txt_to_idx_x_y_yaw.py /root/midterm/src/localization/result/Track3_result.txt /root/midterm/src/localization/result/result_3.csv

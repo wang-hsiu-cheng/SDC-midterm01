@@ -83,6 +83,13 @@ ImuInterval ImuProcessor::Advance(std::int64_t t_ns) {
     return out;
 }
 
+bool ImuProcessor::LatestHeading(double& yaw) const {
+    if (cursor_ == 0) return false;
+    const Eigen::Matrix3d R = samples_[cursor_ - 1].orientation.toRotationMatrix();
+    yaw = std::atan2(R(1, 0), R(0, 0));
+    return true;
+}
+
 bool ImuProcessor::IsStationary(int window_samples, double accel_std_max, double gyro_std_max,
                                 double& yaw_rate_mean) const {
     if (window_samples < 2 || cursor_ < static_cast<std::size_t>(window_samples)) return false;

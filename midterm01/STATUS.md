@@ -23,6 +23,7 @@
 |---|---|---|---|---|
 | T1 | `5597dfe`：候選軟加權＋加速度零偏，無 A、無 floor | 1.79 | **1.56** | 已過 baseline；平滑度基準（加速度中位 0.0128） |
 | T1 | `047f72a`：floor 0.6＋A 搜 xy 格＋hold | 1.7328 | **1.62** | 退步；逐幀抖動 2.9 倍（加速度中位 0.0374） |
+| T1 | **現行正式結果 `yb1`**（`faaf997`：floor 0、`init_search_xy_offsets: [0.0]`、hold，純 yaml） | 1.8209（rmse_p 1.375、yaw 2.23°） | 待提交 | 平滑度同舊版（加速度中位 0.0130）；`Track1_result.txt`／`result_1.csv` 已是此版 |
 | T3 | 舊版 ply_scale 8.5、無 ZUPT | — | 3.98 | |
 | T3 | ply_scale 7.5＋零偏先驗＋ZUPT（`257c97c`） | — | 2.46 | |
 | T3 | A＋E（`6e289ca`） | — | 2.01 | |
@@ -30,7 +31,7 @@
 | T2 | 收斂版，floor 0（`mg2nofloor`） | 2.2773 | 未提交 | `result_2.csv` 已提交；先前全部設定發散（E 218–670） |
 
 ### 結果檔與 yaml 的對應（提交前必須處理）
-- master 的 `Track1_result.txt`／`result_1.csv` 是 floor 0.6＋xy 偏移格的版本（Kaggle 1.62）；`Track3_result.txt`／`result_3.csv` 也是 floor 0.6 時期的版本。**目前三份 yaml 的 floor 都是 0、Track1 的 `init_search_xy_offsets` 是 `[0.0]`，兩者與已提交結果不符**（規則 6），提交前要用目前程式與 yaml 重新產生。
+- **Track1：`Track1_result.txt`／`result_1.csv` 已換成 `yb1`**（使用者指定的正式版；跑在 `faaf997`，該 commit 含預設關閉的 yaw 多起點程式，之後已還原，預設關閉時與還原後的程式逐位元相同〔前 300 幀已驗，全長未另跑〕）。**Track3：`Track3_result.txt`／`result_3.csv` 仍是 floor 0.6 時期的版本**，與目前 yaml（floor 0）不符（規則 6），提交前要重新產生（候選 `zb0`）。
 - Track3 候選：`zb0`（floor 0、hold 開，純 yaml，只在 worktree 的未追蹤結果裡）。Track2 純 yaml 版尚未重跑驗證逐位元相同（現有的是 `-p` 覆寫的 `mg2nofloor`）。
 - master 工作區的 `build/`、`install/` 常是舊的（git 不會更新它們）：在 master 跑之前先 `colcon build`。
 
@@ -92,9 +93,10 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 ## 6. 待辦清單
 
 **P0 提交前**
-- [ ] 用目前程式與 yaml 重新產生並提交 Track1／Track3 正式結果（`Track1_result.txt`／`result_1.csv`、`Track3_result.txt`／`result_3.csv`；Track3 候選 `zb0`）；Track2 純 yaml 重跑驗證（逐位元對 `mg2nofloor`）。
+- [x] Track1 正式結果＝`yb1`（見 §2）。
+- [ ] 重新產生並提交 Track3 正式結果（`Track3_result.txt`／`result_3.csv`；候選 `zb0`）；Track2 純 yaml 重跑驗證（逐位元對 `mg2nofloor`）。
 - [ ] 回歸：關閉我的功能時三個 track 與已提交結果逐位元相同（Track2 分支只驗到 `e4259e2`，之後的 merge 與 yaml 改動尚未驗）。
-- [ ] Track1 提交版本：新版（floor 0＋xy `[0.0]`，尚無 Kaggle 分數）或 `5597dfe` 版（1.56）。
+- [ ] Track1 提交：正式版 `yb1`（本地 E 1.8209，尚無 Kaggle 分數）與 `5597dfe` 版（Kaggle 1.56）擇一。
 
 **P1 Track3 的主要缺口：轉彎與轉彎後 ＝ 早期 NDT 的 yaw 修正方向錯**（方案 D 已刪除；尺度 G／H 暫擱置，見 §4-8；診斷見 §4-9、§4-10）
 - [x] （**負面，已移除**，見 §5）yaw 多起點＋候選 yaw 分散度進量測 R：沒修好早期 +5°，轉彎後航向更差；關鍵訊息＝早期候選 yaw 分散度只有 1.3～2.5°，NDT 的 yaw 量測**有把握但有系統性偏差**，不是雜訊。

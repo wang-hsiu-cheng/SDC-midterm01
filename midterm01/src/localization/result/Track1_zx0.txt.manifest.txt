@@ -1,0 +1,11 @@
+date: 2026-10-26T08:11:14+08:00
+track: Track1
+tag: zx0
+workspace: /home/wangt/SDC-midterm01/.claude/worktrees/diag-final-fitness/midterm01
+git_commit: 4b108767a1de18984c6092f613ffc2044d71fedc
+git_dirty: no
+params_file: src/localization/config/localization_params_Track1.yaml
+params_sha256: fc8635a95e719f177b7c0c18893f1fbe4008c980fff423bb023f15bb615db9f3
+overrides: -p max_frames:=300 -p init_search_xy_offsets:=[0.0]
+image: sdc_ros2_dev:latest sha256:e81dbd12746eea416f2edd741db208904b7bebee3ac07e6753a0ec5357ad525f
+cpus: unlimited

@@ -47,7 +47,6 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 | `InitialPoseSearch`（A） | 第 0 幀以 init 與 IMU 姿態 yaw 為中心 ±30°／5°搜尋，NDT probability 選最佳；`init_search_criterion`（預設 probability）、`init_search_dump` |
 | `YawBank`（Track2 分支） | 車速 >1 m/s 後對 yaw 偏移複製多份濾波器追蹤，150 幀後以 fitness 承諾；僅 Track2 開 |
 | 靜止鎖定（E／H2） | `zupt_freeze_yaw`、`zupt_hold`：ZUPT 靜止時不更新 yaw（K 的 yaw 列歸零）、位置不加過程雜訊、z／傾角不混入 NDT；三個 track 開 |
-| yaw 多起點（P1 做法 1） | `multi_start_yaw_offsets_deg`（預設 `[0.0]`）：每個縱向起點再搭配 yaw 偏移，候選收斂後的 yaw 分散度進量測 R（直行時 yaw 景觀平 → 分散度大 → 少相信；轉彎有結構 → 分散度小）；`yaw_spread_gain`（≥1，預設 1.0）只放大 yaw 分量；診斷檔 `spread_yaw_deg`。**預設關閉；效果尚未驗證** |
 | 預設關閉的實驗 | `floor_sigma_*`（0）、`floor_adaptive`、`conf_r_scale`、`scale_estimation_enabled`（v1，失敗） |
 
 三份 yaml 的差異（`tools/diff_params.py`）：`ply_scale` 8.5／8.7／7.5；Track1 `init_search_xy_offsets: [0.0]`；Track2：關第 0 幀搜尋、釘住 beta（`init_sigma_beta_deg` 0.01、`process_sigma_beta` 1e-6）、`process_sigma_accel_bias` 0.002、ba 偽量測（`zupt_sigma_accel_bias` 0.01、`zupt_accel_mean_max` 0.08）、`yaw_bank_*` 開。floor 三個 track 都是 0。
@@ -87,7 +86,7 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 | 線上尺度估計 v1（每 3 幀 5 個等比候選，單起點 NDT 比 fitness） | T1 E 1.7328→2.238（尺度 7.29–11.47）；T3 尺度掉到下限 5.62，與固定位姿掃描方向相反；fitness 變好但位置變差 | 失敗；單幀 fitness 選尺度會讓尺度吸收錯位（耦合）。預設關閉，待修剪 |
 | `init_search_criterion=fitness` | Track3 約 60 幀後與 probability 版重合 | 保留參數，預設 probability |
 | Track3 `YawBank` | 承諾 0°，各假設 fitness 差 2%；軌跡與基準非逐位元相同（子地圖共用），輸出在假設間切換造成粗糙 | 不採用 |
-| yaw 多起點＋候選 yaw 分散度進 R（`multi_start_yaw_offsets_deg: [-6,0,6]`，`yaw_spread_gain` 1.0，縱向起點照舊 5 個） | T3：早期沒修好（位姿−陀螺儀積分每 500 幀末 +1.2／+5.0／+5.1／+5.2，基準 `zb0` +1.2／+4.9／+5.0／+5.1）；**轉彎後更差**（第 2499／2999／3141 幀 +13.7／+17.4／+17.8°，`zb0` +9.2／+0.2／−0.3°；2178–2700 幀 NDT yaw 修正 +1.81°〔`zb0` −6.00°〕、2700–3142 幀 +8.29°）；final_fitness 第 2500 幀後 0.319／0.315（`zb0` 0.294／0.286）。T1：E 1.8209→1.8365、yaw rms 2.23°→2.36°，平滑度持平 | 失敗。早期（第 1–1000 幀）候選 yaw 分散度中位只有 1.3～2.5°（起點 ±6° 會被 NDT 拉回），不是「直行時 yaw 景觀平」，**NDT 的 yaw 量測看起來有把握卻有系統性偏差（逐段同向 +1.2～+2.4°）**；後段分散度 3.4～3.9° 反而擋住了轉彎出口的正確修正。預設關閉，待修剪 |
+| yaw 多起點＋候選 yaw 分散度進 R（`multi_start_yaw_offsets_deg: [-6,0,6]`，`yaw_spread_gain` 1.0，縱向起點照舊 5 個） | T3：早期沒修好（位姿−陀螺儀積分每 500 幀末 +1.2／+5.0／+5.1／+5.2，基準 `zb0` +1.2／+4.9／+5.0／+5.1）；**轉彎後更差**（第 2499／2999／3141 幀 +13.7／+17.4／+17.8°，`zb0` +9.2／+0.2／−0.3°；2178–2700 幀 NDT yaw 修正 +1.81°〔`zb0` −6.00°〕、2700–3142 幀 +8.29°）；final_fitness 第 2500 幀後 0.319／0.315（`zb0` 0.294／0.286）。T1：E 1.8209→1.8365、yaw rms 2.23°→2.36°，平滑度持平 | 失敗。早期（第 1–1000 幀）候選 yaw 分散度中位只有 1.3～2.5°（起點 ±6° 會被 NDT 拉回），不是「直行時 yaw 景觀平」，**NDT 的 yaw 量測看起來有把握卻有系統性偏差（逐段同向 +1.2～+2.4°）**；後段分散度 3.4～3.9° 反而擋住了轉彎出口的正確修正。預設關閉，待修剪；**程式已移除**（`faaf997` 實作、其後還原，保留在 git 歷史；預設關閉的版本在 Track1／2／3 前 300 幀與改動前逐位元相同） |
 | Track2：掃尺度、搜尋步長、關 yaw 凍結、釘 beta、放寬縱向先驗、加雜訊 | 全長皆發散（E 218–670） | 真因是速度損失（ba 被帶偏），見 §4-11 |
 
 ## 6. 待辦清單
@@ -98,7 +97,8 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 - [ ] Track1 提交版本：新版（floor 0＋xy `[0.0]`，尚無 Kaggle 分數）或 `5597dfe` 版（1.56）。
 
 **P1 Track3 的主要缺口：轉彎與轉彎後 ＝ 早期 NDT 的 yaw 修正方向錯**（方案 D 已刪除；尺度 G／H 暫擱置，見 §4-8；診斷見 §4-9、§4-10）
-- [x] （**負面**，見 §5）**讓直行段的 NDT yaw 修正少相信**（**做法 ① 已實作、預設關閉**：關閉時 Track1／2／3 前 300 幀分別與 `zx0`／master 已提交 Track2 結果／`zb0` 逐位元相同；**開啟的效果尚未跑**）：第 100–1000 幀 NDT 修正貢獻 +3.25°、零偏估計貢獻 +1.82°，把 yaw 拉到比陀螺儀積分高 5°。候選：①yaw 多起點（候選 yaw ±3°），用候選的 yaw 分散度當 R_yaw（現在所有候選共用同一個 yaw，`spread_cov` 的 yaw 分量為 0）——直行時 yaw 景觀平 → R_yaw 大；轉彎有結構 → R_yaw 小，轉彎出口仍能把航向修回；②單純加大 `meas_sigma_yaw_deg`（會同時削弱轉彎出口的修正，不建議當最終解）；③零偏估計加強先驗（行駛中被拉到 −0.005～−0.006，真值 −0.0041）。驗證：Track3 的位姿−陀螺儀積分（第 900／2178 幀應接近 0）、轉彎出口 NDT 最佳解的橫向偏移是否縮小，並用 Track1 GNSS yaw rms（基準 2.29°）確認不退步。
+- [x] （**負面，已移除**，見 §5）yaw 多起點＋候選 yaw 分散度進量測 R：沒修好早期 +5°，轉彎後航向更差；關鍵訊息＝早期候選 yaw 分散度只有 1.3～2.5°，NDT 的 yaw 量測**有把握但有系統性偏差**，不是雜訊。
+- [ ] **查 NDT yaw 量測偏差的來源**（第 100–1000 幀每段同向 +1.2～+2.4°）。候選：①點雲尺度偏差（早期單幀最佳尺度偏小）；②傾角（PLY body 持續 roll −6～−8°、pitch 1～6°，濾波器不估計傾角，`tilt_gain` 0.5 向 NDT 靠攏）；③遠距幾何失真。診斷（不改演算法）：固定位姿、起始 yaw＝陀螺儀參考 yaw，看 NDT 對齊後的 yaw 偏差如何隨尺度、傾角偏移變化。
 - [ ] 次要／待證：運動模型槓桿臂（前鏡頭在後軸前方，轉彎時側向速度約 L·ω）。目前橫向偏移已能由 yaw 偏差解釋，槓桿臂不是首要。
 - [ ] 地圖軌跡點雲當航向／橫向先驗（§7 合規未確認前不實作）；遠距點降權（人工觀察前 800 幀右側遠處建築距離似有問題）。
 

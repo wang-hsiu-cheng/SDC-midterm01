@@ -29,6 +29,7 @@
 #include "localization/ndt_matcher.h"
 #include "localization/scale_estimator.h"
 #include "localization/state_estimator.h"
+#include "localization/yaw_bank.h"
 
 namespace localization {
 
@@ -126,9 +127,18 @@ private:
     bool zupt_enabled_ = true;
     int zupt_window_samples_ = 50;
     double zupt_accel_std_max_ = 0.12;       // m/s^2，三軸標準差總和
+    double zupt_accel_mean_max_ = 0.0;       // m/s^2，窗口前向加速度均值與目前加速度零偏的最大差（0 = 不檢查）
     double zupt_gyro_std_max_ = 0.009;       // rad/s，三軸標準差總和
     double gyro_bias_prior_ = 0.0;           // rad/s
     double bias_prior_sigma_unknown_ = 0.02; // rad/s
+
+    // 初始 yaw 假設銀行（車起步後才建立，見 yaw_bank.h）；offsets 是相對目前濾波器 yaw 的偏移
+    bool yaw_bank_enabled_ = false;
+    std::vector<double> yaw_bank_offsets_deg_{0.0};
+    int yaw_bank_frames_ = 150;          // 銀行運作幀數，之後承諾分數最佳者
+    double yaw_bank_start_speed_ = 0.3;  // m/s，濾波器速度超過此值（且非靜止）才起步
+    std::string yaw_bank_score_ = "fitness";
+    YawBank yaw_bank_;
 
     bool publish_frames_ = true;
     bool publish_global_map_ = false;
@@ -137,6 +147,7 @@ private:
 
     std::ofstream result_file_;
     std::ofstream diag_file_;
+    std::ofstream bank_file_;  // yaw 假設銀行每幀每個假設的指標（離線選打分函式用）
     pcl::PointCloud<pcl::PointXYZ>::Ptr map_cloud_;
     std::vector<PlyFrameInfo> ply_frames_;
 };

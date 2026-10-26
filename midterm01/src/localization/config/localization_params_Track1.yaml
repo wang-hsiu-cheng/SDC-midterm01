@@ -90,8 +90,8 @@
     conf_r_scale: 1.0             # <1：候選分散度與 fitness 都在下面門檻內時縮小量測 R（方案 C）；1 = 不使用
     conf_spread_max: 0.8          # m，候選縱向分散度門檻（Track1 四分位約 0.8／1.1／1.5）
     conf_fitness_max: 0.235       # fitness 門檻（Track1 中位數）
-    floor_sigma_xy: 0.6           # m，P 的 xy 下限，0 = 不設（方案 C）；Track1 前 300 幀掃 0.2–1.0、全長 0.6 最佳（E 1.908→1.733），1.0 變差
-    floor_sigma_yaw_deg: 0.5
+    floor_sigma_xy: 0.0           # m，P 的 xy 下限（方案 C），0 = 不設。10/26 關閉：0.6 提高增益，把 NDT 逐幀雜訊灌進位姿，Track1 抖動約 2.9 倍、Kaggle 1.56→1.62，Track2 發散（E 2.27→16.96），Track3 只換到 −0.08
+    floor_sigma_yaw_deg: 0.0      # 同上
     floor_adaptive: false         # true：只在 NDT 創新有持續偏向時才啟用 floor（上面兩個值是全開時的下限）
     floor_ema_alpha: 0.1
     floor_noise_alpha: 0.02

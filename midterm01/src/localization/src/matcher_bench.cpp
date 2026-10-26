@@ -6,6 +6,7 @@
 //   matcher_bench --method ndt|gicp --map <pcd> --ply_dir <dir> --init <init_guess.txt>
 //                 --out <result.txt> [--stats <stats.csv>] [--max_frames N] [--scale 8]
 //                 [--source_voxel 0.5] [--max_range 0] [--epsilon 0.01] [--submap_half 50] [--recrop_dist 10]
+//                 [--outlier_ratio 0.55] [--ndt_resolutions 4,3] [--source_min_z -1.2] [--keep_vertical 0.5] [--sor_k 20 --sor_std 1.0]
 //                 [--ndt_resolution 3] [--ndt_step 0.2] [--max_iter 35]
 //                 [--gicp_max_corr 2.0] [--gicp_k 20] [--reject_dist 3.0] [--target_voxel 0]
 //   guess 模式（不追蹤，逐行獨立配準，用來量測收斂域與偏差）：
@@ -27,7 +28,9 @@
 #include <Eigen/Geometry>
 
 #include <pcl/common/transforms.h>
+#include <pcl/features/normal_3d.h>
 #include <pcl/filters/crop_box.h>
+#include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/io/ply_io.h>
@@ -54,6 +57,14 @@ struct Options {
     double ndt_resolution = 3.0;
     double ndt_step = 0.2;
     int max_iter = 35;
+    double outlier_ratio = -1.0;       // NDT 的離群比例（PCL 預設 0.55）；<0 = 用預設
+    std::string ndt_resolutions;       // 粗到細，例如 "4,3"：依序對齊，前一階的結果當下一階的起點；空 = 只用 ndt_resolution
+    double source_min_z = -1e9;        // 縮放後 z（向上）下限：去地面用，相機下方約 1.7 m 是地面
+    double source_max_z = 1e9;
+    double keep_vertical = 0.0;        // >0：只留法向 |n_z| < 此值的點（垂直面：牆、柱）；0 = 不篩
+    double normal_radius = 1.5;        // m，法向估計半徑
+    int sor_k = 0;                     // >0：統計式離群點去除的近鄰數
+    double sor_std = 1.0;
     double gicp_max_corr = 2.0;
     int gicp_k = 20;
     double reject_dist = 3.0;
@@ -71,7 +82,9 @@ bool ParseArgs(int argc, char** argv, Options& o) {
     num("--max_frames", o.max_frames); dbl("--scale", o.scale); dbl("--source_voxel", o.source_voxel);
     dbl("--max_range", o.max_range); dbl("--epsilon", o.ndt_epsilon);
     dbl("--submap_half", o.submap_half); dbl("--recrop_dist", o.recrop_dist);
-    dbl("--ndt_resolution", o.ndt_resolution); dbl("--ndt_step", o.ndt_step); num("--max_iter", o.max_iter);
+    dbl("--ndt_resolution", o.ndt_resolution); dbl("--outlier_ratio", o.outlier_ratio); str("--ndt_resolutions", o.ndt_resolutions);
+    dbl("--source_min_z", o.source_min_z); dbl("--source_max_z", o.source_max_z); dbl("--keep_vertical", o.keep_vertical);
+    dbl("--normal_radius", o.normal_radius); num("--sor_k", o.sor_k); dbl("--sor_std", o.sor_std); dbl("--ndt_step", o.ndt_step); num("--max_iter", o.max_iter);
     dbl("--gicp_max_corr", o.gicp_max_corr); num("--gicp_k", o.gicp_k); dbl("--reject_dist", o.reject_dist);
     dbl("--target_voxel", o.target_voxel);
     return !o.map.empty() && !o.ply_dir.empty() && (!o.init.empty() || !o.guess_file.empty()) && !o.out.empty() &&
@@ -124,10 +137,21 @@ Eigen::Matrix4f Orthonormalized(const Eigen::Matrix4f& T) {
 class Matcher {
 public:
     explicit Matcher(const Options& o) : o_(o) {
-        ndt_.setResolution(o.ndt_resolution);
-        ndt_.setStepSize(o.ndt_step);
-        ndt_.setTransformationEpsilon(o.ndt_epsilon);
-        ndt_.setMaximumIterations(o.max_iter);
+        std::vector<double> resolutions;
+        std::stringstream list(o.ndt_resolutions);
+        for (std::string item; std::getline(list, item, ',');) {
+            if (!item.empty()) resolutions.push_back(std::stod(item));
+        }
+        if (resolutions.empty()) resolutions.push_back(o.ndt_resolution);
+        for (const double resolution : resolutions) {
+            auto ndt = std::make_unique<Ndt>();
+            ndt->setResolution(resolution);
+            ndt->setStepSize(o.ndt_step);
+            ndt->setTransformationEpsilon(o.ndt_epsilon);
+            ndt->setMaximumIterations(o.max_iter);
+            if (o.outlier_ratio >= 0.0) ndt->setOulierRatio(o.outlier_ratio);  // PCL 的函式名就是 setOulierRatio（拼字錯誤）;
+            ndts_.push_back(std::move(ndt));
+        }
         gicp_.setMaxCorrespondenceDistance(o.gicp_max_corr);
         gicp_.setCorrespondenceRandomness(o.gicp_k);
         gicp_.setMaximumIterations(o.max_iter);
@@ -136,18 +160,25 @@ public:
     }
 
     void SetTarget(const Cloud::Ptr& target) {
-        if (o_.method == "ndt") ndt_.setInputTarget(target);
-        else gicp_.setInputTarget(target);
+        if (o_.method == "ndt") {
+            for (auto& ndt : ndts_) ndt->setInputTarget(target);
+        } else {
+            gicp_.setInputTarget(target);
+        }
     }
 
     bool Align(const Cloud::Ptr& source, const Eigen::Matrix4f& guess, Eigen::Matrix4f& result, double& fitness) {
         Cloud aligned;
         if (o_.method == "ndt") {
-            ndt_.setInputSource(source);
-            ndt_.align(aligned, guess);
-            result = ndt_.getFinalTransformation();
-            fitness = ndt_.getFitnessScore(1.0);
-            return ndt_.hasConverged();
+            Eigen::Matrix4f current = guess;
+            for (auto& ndt : ndts_) {  // 粗到細：前一階的結果當下一階的起點
+                ndt->setInputSource(source);
+                ndt->align(aligned, current);
+                current = ndt->getFinalTransformation();
+            }
+            result = current;
+            fitness = ndts_.back()->getFitnessScore(1.0);
+            return ndts_.back()->hasConverged();
         }
         gicp_.setInputSource(source);
         gicp_.align(aligned, guess);
@@ -158,7 +189,8 @@ public:
 
 private:
     const Options& o_;
-    pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> ndt_;
+    using Ndt = pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>;
+    std::vector<std::unique_ptr<Ndt>> ndts_;
     pcl::GeneralizedIterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> gicp_;
 };
 
@@ -182,12 +214,38 @@ Cloud::Ptr LoadSource(const std::string& path, const Options& o) {
         if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) continue;
         p.x *= o.scale; p.y *= o.scale; p.z *= o.scale;
         if (o.max_range > 0.0 && std::hypot(p.x, p.y) > o.max_range) continue;  // 與管線 FilterInputCloud 相同：縮放後的水平距離
+        if (p.z < o.source_min_z || p.z > o.source_max_z) continue;
         scaled->points.push_back(p);
     }
     scaled->width = static_cast<std::uint32_t>(scaled->size());
     scaled->height = 1;
     scaled->is_dense = true;
-    return Voxel(scaled, o.source_voxel);
+    Cloud::Ptr out = Voxel(scaled, o.source_voxel);
+    if (o.keep_vertical > 0.0 && out->size() > 10) {
+        pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> estimation;
+        pcl::PointCloud<pcl::Normal> normals;
+        estimation.setInputCloud(out);
+        estimation.setRadiusSearch(o.normal_radius);
+        estimation.compute(normals);
+        auto vertical = std::make_shared<Cloud>();
+        for (std::size_t i = 0; i < out->size(); ++i) {
+            if (std::isfinite(normals[i].normal_z) && std::abs(normals[i].normal_z) < o.keep_vertical) vertical->points.push_back(out->points[i]);
+        }
+        vertical->width = static_cast<std::uint32_t>(vertical->size());
+        vertical->height = 1;
+        vertical->is_dense = true;
+        out = vertical;
+    }
+    if (o.sor_k > 0 && out->size() > static_cast<std::size_t>(o.sor_k)) {
+        auto filtered = std::make_shared<Cloud>();
+        pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
+        sor.setInputCloud(out);
+        sor.setMeanK(o.sor_k);
+        sor.setStddevMulThresh(o.sor_std);
+        sor.filter(*filtered);
+        out = filtered;
+    }
+    return out;
 }
 
 int RunGuessMode(const Options& o, const Cloud::Ptr& map, const std::vector<std::string>& plys) {

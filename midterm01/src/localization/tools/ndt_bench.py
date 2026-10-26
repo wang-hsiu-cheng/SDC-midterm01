@@ -9,7 +9,7 @@
 做法：每個取樣幀（預設每 20 幀、前 600 幀、現行輸出速度 >1 m/s）建立 7 個起點（正確位置、縱向 ±1.5 m、橫向 ±1.5 m、yaw ±3°），
 各跑一次 matcher_bench（guess 模式，單幀獨立對齊）。起點的位置與 yaw：Track1/2 取 GNSS（只作離線評估參考，不進演算法），
 Track3 沒有 GNSS，取現行輸出位姿；z／roll／pitch 取自現行輸出。NDT 參數、尺度、距離過濾、體素預設取自該 track 的 yaml，
-所以基準等同現行管線；--bench-args 可覆寫（後者蓋前者），例如 "--ndt_resolution 2 --epsilon 0.001"。
+所以基準等同現行管線；--bench-args 可覆寫（後者蓋前者），例如 "--ndt_resolution 2 --epsilon 0.001"；--bench-args 內的 {track} 會換成該 track 名稱（例如換地圖 "--map /root/data/{track}/map_downsampled_0.5m.pcd"）。
 
 指標（越小越好）：
   準度（只有 Track1/2）：對 GNSS 的車體座標誤差（縱向、橫向、yaw）去掉各 track 的平均（GNSS 與車體參考點有固定偏移）後的 std。
@@ -114,7 +114,7 @@ def bench_command(track, label, extra):
             '--max_range %s' % yaml_value(track, 'input_max_range', '0'), '--source_voxel %s' % yaml_value(track, 'input_voxel_leaf_size', '0.5'),
             '--ndt_resolution %s' % yaml_value(track, 'ndt_resolution', '3'), '--ndt_step %s' % yaml_value(track, 'ndt_step_size', '0.2'),
             '--max_iter %s' % yaml_value(track, 'ndt_max_iterations', '35'), '--epsilon %s' % yaml_value(track, 'ndt_transformation_epsilon', '0.01')]
-    return 'source install/setup.bash && ros2 run localization matcher_bench ' + ' '.join(args) + ' ' + extra
+    return 'source install/setup.bash && ros2 run localization matcher_bench ' + ' '.join(args) + ' ' + extra.replace('{track}', track)
 
 
 def evaluate(track, label):

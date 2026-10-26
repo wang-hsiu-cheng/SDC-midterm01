@@ -157,7 +157,7 @@ IMU ─────────────────────────�
 
 **P0 現況與待決（先於任何新功能）**
 - [ ] 分支 `worktree-diag-final-fitness`（merge commit c420e81，已併入 master 7e79fdb）合進 master：待使用者同意；併入後尚未做任何驗證 run（使用者指示不要自動跑）。需要時的回歸：Track1 前 300 幀與全長（E=1.7328）、Track2（mg2nofloor E=2.2773）、Track3 與 H2 `cmp`。
-- [ ] 數字待對齊：使用者回報 Track2 關 floor 後 E=2.7，STATUS 記 `mg2nofloor` E=2.2773。
+- [x] Track2 關 floor 後 E=2.27（`mg2nofloor` 2.2773，與併入前 2.274 相同）；使用者先前回報的 2.7 是筆誤。**消融定案：破壞 Track2 的只有 floor**（只關 hold 仍 16.13、只關 floor 回到 2.2773），`zupt_hold` 與 E 的 K 增益歸零對 Track2 沒有副作用，不需再單獨消融。
 - [ ] **floor 預設**：共用程式預設關閉；Track1 yaml 的 `floor_sigma_xy` 0.6 是否改回 0（Kaggle 1.56 版平滑度）；Track3 是否保留，用 `analyze_diag.py` F 區段比較 AE（無 floor，Kaggle 2.01）與 H2（floor 0.6，Kaggle 1.93），抖動可接受才保留。
 - [ ] **Track1 提交版本**：目前 master 的 `result_1.csv` 是 floor 0.6（Kaggle 1.62）；1.56 的版本是 commit `5597dfe`（本地 E 1.79，無 A）。
 - [ ] **A 的 xy 偏移格**：Track1 起點被 A 移 (+1.8,+1.2) m（舊版 (−0.7,+0.8)→新版 (+1.1,+2.0)）；驗證 `init_search_xy_offsets: [0.0]`（Track1 前 300 幀，起點誤差與前 300 幀 rms 是否回到舊版 1.24/1.66）。

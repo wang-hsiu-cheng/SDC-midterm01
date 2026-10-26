@@ -66,6 +66,11 @@ def section_a(d, x, y):
         yi = d['yaw_minus_imu_deg']
         print('   位姿 yaw − 陀螺儀自第 0 幀積分（診斷檔，扣第 0 幀零偏）：每 500 幀末 %s deg' % (
             ' '.join('%+.1f' % yi[min(b, len(d)) - 1] for a, b in seg)))
+    if 'spread_yaw_deg' in d.dtype.names:
+        sy = d['spread_yaw_deg']
+        seg = [(a, min(a + 500, len(d))) for a in range(0, len(d), 500)]
+        print('   候選 yaw 分散度（multi_start_yaw_offsets_deg 開啟時才有意義；大＝yaw 沒有鑑別力）中位 %.2f deg；每 500 幀中位 %s' % (
+            np.median(sy[5:]), ' '.join('%.2f' % np.median(sy[a:b]) for a, b in seg)))
     if 'ply_scale' in d.dtype.names:
         sc = d['ply_scale']
         seg = [(a, min(a + 500, len(d))) for a in range(0, len(d), 500)]

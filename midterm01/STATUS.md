@@ -47,6 +47,7 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 | `InitialPoseSearch`（A） | 第 0 幀以 init 與 IMU 姿態 yaw 為中心 ±30°／5°搜尋，NDT probability 選最佳；`init_search_criterion`（預設 probability）、`init_search_dump` |
 | `YawBank`（Track2 分支） | 車速 >1 m/s 後對 yaw 偏移複製多份濾波器追蹤，150 幀後以 fitness 承諾；僅 Track2 開 |
 | 靜止鎖定（E／H2） | `zupt_freeze_yaw`、`zupt_hold`：ZUPT 靜止時不更新 yaw（K 的 yaw 列歸零）、位置不加過程雜訊、z／傾角不混入 NDT；三個 track 開 |
+| yaw 多起點（P1 做法 1） | `multi_start_yaw_offsets_deg`（預設 `[0.0]`）：每個縱向起點再搭配 yaw 偏移，候選收斂後的 yaw 分散度進量測 R（直行時 yaw 景觀平 → 分散度大 → 少相信；轉彎有結構 → 分散度小）；`yaw_spread_gain`（≥1，預設 1.0）只放大 yaw 分量；診斷檔 `spread_yaw_deg`。**預設關閉；效果尚未驗證** |
 | 預設關閉的實驗 | `floor_sigma_*`（0）、`floor_adaptive`、`conf_r_scale`、`scale_estimation_enabled`（v1，失敗） |
 
 三份 yaml 的差異（`tools/diff_params.py`）：`ply_scale` 8.5／8.7／7.5；Track1 `init_search_xy_offsets: [0.0]`；Track2：關第 0 幀搜尋、釘住 beta（`init_sigma_beta_deg` 0.01、`process_sigma_beta` 1e-6）、`process_sigma_accel_bias` 0.002、ba 偽量測（`zupt_sigma_accel_bias` 0.01、`zupt_accel_mean_max` 0.08）、`yaw_bank_*` 開。floor 三個 track 都是 0。
@@ -96,7 +97,7 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 - [ ] Track1 提交版本：新版（floor 0＋xy `[0.0]`，尚無 Kaggle 分數）或 `5597dfe` 版（1.56）。
 
 **P1 Track3 的主要缺口：轉彎與轉彎後 ＝ 早期 NDT 的 yaw 修正方向錯**（方案 D 已刪除；尺度 G／H 暫擱置，見 §4-8；診斷見 §4-9、§4-10）
-- [ ] **讓直行段的 NDT yaw 修正少相信**：第 100–1000 幀 NDT 修正貢獻 +3.25°、零偏估計貢獻 +1.82°，把 yaw 拉到比陀螺儀積分高 5°。候選：①yaw 多起點（候選 yaw ±3°），用候選的 yaw 分散度當 R_yaw（現在所有候選共用同一個 yaw，`spread_cov` 的 yaw 分量為 0）——直行時 yaw 景觀平 → R_yaw 大；轉彎有結構 → R_yaw 小，轉彎出口仍能把航向修回；②單純加大 `meas_sigma_yaw_deg`（會同時削弱轉彎出口的修正，不建議當最終解）；③零偏估計加強先驗（行駛中被拉到 −0.005～−0.006，真值 −0.0041）。驗證：Track3 的位姿−陀螺儀積分（第 900／2178 幀應接近 0）、轉彎出口 NDT 最佳解的橫向偏移是否縮小，並用 Track1 GNSS yaw rms（基準 2.29°）確認不退步。
+- [~] **讓直行段的 NDT yaw 修正少相信**（**做法 ① 已實作、預設關閉**：關閉時 Track1／2／3 前 300 幀分別與 `zx0`／master 已提交 Track2 結果／`zb0` 逐位元相同；**開啟的效果尚未跑**）：第 100–1000 幀 NDT 修正貢獻 +3.25°、零偏估計貢獻 +1.82°，把 yaw 拉到比陀螺儀積分高 5°。候選：①yaw 多起點（候選 yaw ±3°），用候選的 yaw 分散度當 R_yaw（現在所有候選共用同一個 yaw，`spread_cov` 的 yaw 分量為 0）——直行時 yaw 景觀平 → R_yaw 大；轉彎有結構 → R_yaw 小，轉彎出口仍能把航向修回；②單純加大 `meas_sigma_yaw_deg`（會同時削弱轉彎出口的修正，不建議當最終解）；③零偏估計加強先驗（行駛中被拉到 −0.005～−0.006，真值 −0.0041）。驗證：Track3 的位姿−陀螺儀積分（第 900／2178 幀應接近 0）、轉彎出口 NDT 最佳解的橫向偏移是否縮小，並用 Track1 GNSS yaw rms（基準 2.29°）確認不退步。
 - [ ] 次要／待證：運動模型槓桿臂（前鏡頭在後軸前方，轉彎時側向速度約 L·ω）。目前橫向偏移已能由 yaw 偏差解釋，槓桿臂不是首要。
 - [ ] 地圖軌跡點雲當航向／橫向先驗（§7 合規未確認前不實作）；遠距點降權（人工觀察前 800 幀右側遠處建築距離似有問題）。
 

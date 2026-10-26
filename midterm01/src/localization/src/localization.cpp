@@ -38,7 +38,7 @@ int LocalizationApp::Start(int argc, char** argv) {
         return -1;
     }
     diag_file_.open(output_path.string() + ".diag.csv");
-    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,ply_scale,floor_scale\n";
+    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,ply_scale,floor_scale,spread_yaw_deg\n";
 
     if (yaw_bank_enabled_) {
         bank_file_.open(output_path.string() + ".bank.csv");
@@ -192,6 +192,10 @@ bool LocalizationApp::LoadParameters() {
     node_->declare_parameter<std::vector<double>>("multi_start_lon_offsets", multi_start_lon_offsets_);
     multi_start_lon_offsets_ = node_->get_parameter("multi_start_lon_offsets").as_double_array();
     if (multi_start_lon_offsets_.empty()) multi_start_lon_offsets_ = {0.0};
+    node_->declare_parameter<std::vector<double>>("multi_start_yaw_offsets_deg", multi_start_yaw_offsets_deg_);
+    multi_start_yaw_offsets_deg_ = node_->get_parameter("multi_start_yaw_offsets_deg").as_double_array();
+    if (multi_start_yaw_offsets_deg_.empty()) multi_start_yaw_offsets_deg_ = {0.0};
+    declare_double("yaw_spread_gain", yaw_spread_gain_);
 
     declare_bool("keep_alive", keep_alive_);
     declare_bool("publish_frames", publish_frames_);
@@ -483,7 +487,7 @@ bool LocalizationApp::RunLocalization() {
             StateEstimator::UpdateInfo info;
             bool stationary = false;
             bool converged = false;
-            double fitness = -1.0, spread_lon = 0.0, n_eff = 0.0;
+            double fitness = -1.0, spread_lon = 0.0, spread_yaw_deg = 0.0, n_eff = 0.0;
         };
         const auto step = [&](StateEstimator& est) {
             StepResult r;
@@ -514,9 +518,17 @@ bool LocalizationApp::RunLocalization() {
                 const Eigen::Vector3f forward(std::cos(static_cast<float>(est.yaw())),
                                               std::sin(static_cast<float>(est.yaw())), 0.0f);
                 for (const double offset : multi_start_lon_offsets_) {
-                    Eigen::Matrix4f start = r.guess;
-                    start.block<3, 1>(0, 3) += static_cast<float>(offset) * forward;
-                    starts.push_back(start);
+                    for (const double yaw_offset_deg : multi_start_yaw_offsets_deg_) {
+                        Eigen::Matrix4f start = r.guess;
+                        start.block<3, 1>(0, 3) += static_cast<float>(offset) * forward;
+                        if (yaw_offset_deg != 0.0) {
+                            const Eigen::Matrix3f rz =
+                                Eigen::AngleAxisf(static_cast<float>(yaw_offset_deg * M_PI / 180.0), Eigen::Vector3f::UnitZ())
+                                    .toRotationMatrix();
+                            start.block<3, 3>(0, 0) = rz * start.block<3, 3>(0, 0);
+                        }
+                        starts.push_back(start);
+                    }
                 }
                 const auto candidates = matcher.AlignAll(input, starts);
                 r.converged = !candidates.empty();
@@ -528,6 +540,9 @@ bool LocalizationApp::RunLocalization() {
                     r.n_eff = merged.effective_candidates;
                     const Eigen::Vector2d heading(std::cos(est.yaw()), std::sin(est.yaw()));
                     r.spread_lon = std::sqrt(std::max(0.0, heading.dot(merged.spread_cov.topLeftCorner<2, 2>() * heading)));
+                    r.spread_yaw_deg = std::sqrt(std::max(0.0, merged.spread_cov(2, 2))) * 180.0 / M_PI;
+                    Eigen::Matrix3d spread_cov = merged.spread_cov;
+                    spread_cov(2, 2) *= std::max(1.0, yaw_spread_gain_);  // 只加大對角元素，協方差仍半正定
                     if (first) {
                         // 第 0 幀：init_guess 帶雜訊，直接以 NDT 結果作為濾波器初值
                         est.Initialize(merged.pose, est.bias(), bias_sigma);
@@ -536,7 +551,7 @@ bool LocalizationApp::RunLocalization() {
                                              ? std::pow(r.fitness / fitness_ref_, 2) : 1.0;
                         // 候選一致且配準好 → 這一幀的 NDT 值得多信一點；分散度的額外 R 照舊加在後面
                         if (r.spread_lon <= conf_spread_max_ && r.fitness <= conf_fitness_max_) r_scale *= conf_r_scale_;
-                        r.info = est.Update(merged.pose, r_scale, merged.spread_cov, r.stationary);
+                        r.info = est.Update(merged.pose, r_scale, spread_cov, r.stationary);
                     }
                 }
             }
@@ -636,7 +651,7 @@ bool LocalizationApp::RunLocalization() {
         diag_file_ << ',' << sigma_lon << ',' << sigma_lat << ',' << sigma_yaw << ',' << result.spread_lon << ',' << result.n_eff << ',' << shown.accel_bias();
         const auto yaw_of = [](const Eigen::Matrix4f& T) { return std::atan2(T(1, 0), T(0, 0)); };
         diag_file_ << ',' << guess_out(0, 3) << ',' << guess_out(1, 3) << ',' << yaw_of(guess_out) << ',' << measured(0, 3) << ','
-                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << scale_estimator.scale() << ',' << shown.floor_scale() << '\n';
+                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << scale_estimator.scale() << ',' << shown.floor_scale() << ',' << result.spread_yaw_deg << '\n';
         ++processed;
         rclcpp::spin_some(node_);
 

@@ -120,6 +120,11 @@ private:
     double conf_fitness_max_ = 0.0;
     // NDT 多起點：沿預測的行進方向平移的偏移量（m），含 0；只有 0 = 單起點
     std::vector<double> multi_start_lon_offsets_{0.0};
+    // NDT 多起點的 yaw 偏移（度），含 0：每個縱向偏移各搭配這些 yaw 偏移。候選收斂後的 yaw 分散度反映 yaw 有沒有鑑別力——
+    // 直行時 yaw 景觀平，候選停在各自的起點、分散度大；轉彎有結構，候選收斂到同一個 yaw、分散度小。
+    // 分散度進量測 R，直行時少相信 NDT 的 yaw、轉彎時照常修正（Track3 早期 +5° 航向殘餘由直行段的 NDT yaw 修正累積而成）。只有 0 = 不使用
+    std::vector<double> multi_start_yaw_offsets_deg_{0.0};
+    double yaw_spread_gain_ = 1.0;   // ≥1：只放大候選 yaw 分散度（量測 R 的 yaw 分量）的倍率
     // 起步靜止段估計陀螺儀零偏：樣本數與標準差門檻（超過視為車已在動，改由濾波器在線估計）
     int bias_min_samples_ = 50;
     double bias_max_stddev_ = 0.003;

@@ -97,6 +97,8 @@
     floor_noise_alpha: 0.02
     floor_z_low: 2.0
     floor_z_high: 4.0
+    multi_start_yaw_offsets_deg: [0.0]   # 每個縱向起點再搭配的 yaw 偏移（度）；[0.0] = 不使用。候選 yaw 分散度進量測 R
+    yaw_spread_gain: 1.0          # ≥1：只放大候選 yaw 分散度的倍率（多起點 yaw 開啟時才有意義）
     multi_start_lon_offsets: [0.0, 1.5, -1.5, 3.0, -3.0]   # 只有 [0.0] = 單起點
     fusion_probability_power: 4.0 # 候選權重 (p/p_max)^power
     fusion_prior_sigma_lon: 2.0   # 以預測為中心的先驗

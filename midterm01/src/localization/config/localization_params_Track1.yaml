@@ -37,7 +37,7 @@
     init_search_dump: false       # 診斷：輸出每個起點的結果到 <結果檔>.initsearch.csv
     init_search_yaw_range_deg: 30.0
     init_search_yaw_step_deg: 5.0
-    init_search_xy_offsets: [0.0, 2.0, -2.0]   # m，縱向×橫向格狀組合
+    init_search_xy_offsets: [0.0]   # m，縱向×橫向格狀組合。Track1 只搜 yaw：init_guess 的 xy 本來就準，0／±2 m 的偏移格會在縱向退化方向被 NDT 挑走，起點被搬 (+1.8,+1.2) m、前 300 幀 rms 1.49→2.16（10/26 P0-5）
 
     # IMU
     imu_topic: /imu/data

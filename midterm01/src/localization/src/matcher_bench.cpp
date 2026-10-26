@@ -6,7 +6,7 @@
 //   matcher_bench --method ndt|gicp --map <pcd> --ply_dir <dir> --init <init_guess.txt>
 //                 --out <result.txt> [--stats <stats.csv>] [--max_frames N] [--scale 8]
 //                 [--source_voxel 0.5] [--max_range 0] [--epsilon 0.01] [--submap_half 50] [--recrop_dist 10]
-//                 [--outlier_ratio 0.55] [--ndt_resolutions 4,3] [--source_min_z -1.2] [--keep_vertical 0.5] [--sor_k 20 --sor_std 1.0]
+//                 [--outlier_ratio 0.55] [--ndt_resolutions 4,3] [--source_min_z -1.2] [--keep_vertical 0.5] [--sor_k 20 --sor_std 1.0] [--source_side 1|-1]
 //                 [--ndt_resolution 3] [--ndt_step 0.2] [--max_iter 35]
 //                 [--gicp_max_corr 2.0] [--gicp_k 20] [--reject_dist 3.0] [--target_voxel 0]
 //   guess 模式（不追蹤，逐行獨立配準，用來量測收斂域與偏差）：
@@ -63,6 +63,7 @@ struct Options {
     double source_max_z = 1e9;
     double keep_vertical = 0.0;        // >0：只留法向 |n_z| < 此值的點（垂直面：牆、柱）；0 = 不篩
     double normal_radius = 1.5;        // m，法向估計半徑
+    int source_side = 0;               // 1 = 只留左半（y>0）、-1 = 只留右半（y<0）：診斷點雲左右兩側各自把 NDT 拉向哪裡
     int sor_k = 0;                     // >0：統計式離群點去除的近鄰數
     double sor_std = 1.0;
     double gicp_max_corr = 2.0;
@@ -84,7 +85,7 @@ bool ParseArgs(int argc, char** argv, Options& o) {
     dbl("--submap_half", o.submap_half); dbl("--recrop_dist", o.recrop_dist);
     dbl("--ndt_resolution", o.ndt_resolution); dbl("--outlier_ratio", o.outlier_ratio); str("--ndt_resolutions", o.ndt_resolutions);
     dbl("--source_min_z", o.source_min_z); dbl("--source_max_z", o.source_max_z); dbl("--keep_vertical", o.keep_vertical);
-    dbl("--normal_radius", o.normal_radius); num("--sor_k", o.sor_k); dbl("--sor_std", o.sor_std); dbl("--ndt_step", o.ndt_step); num("--max_iter", o.max_iter);
+    dbl("--normal_radius", o.normal_radius); num("--sor_k", o.sor_k); num("--source_side", o.source_side); dbl("--sor_std", o.sor_std); dbl("--ndt_step", o.ndt_step); num("--max_iter", o.max_iter);
     dbl("--gicp_max_corr", o.gicp_max_corr); num("--gicp_k", o.gicp_k); dbl("--reject_dist", o.reject_dist);
     dbl("--target_voxel", o.target_voxel);
     return !o.map.empty() && !o.ply_dir.empty() && (!o.init.empty() || !o.guess_file.empty()) && !o.out.empty() &&
@@ -215,6 +216,7 @@ Cloud::Ptr LoadSource(const std::string& path, const Options& o) {
         p.x *= o.scale; p.y *= o.scale; p.z *= o.scale;
         if (o.max_range > 0.0 && std::hypot(p.x, p.y) > o.max_range) continue;  // 與管線 FilterInputCloud 相同：縮放後的水平距離
         if (p.z < o.source_min_z || p.z > o.source_max_z) continue;
+        if ((o.source_side > 0 && p.y <= 0.0) || (o.source_side < 0 && p.y >= 0.0)) continue;
         scaled->points.push_back(p);
     }
     scaled->width = static_cast<std::uint32_t>(scaled->size());

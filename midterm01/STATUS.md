@@ -401,3 +401,8 @@ IMU ─────────────────────────�
 - Track2 合併後純 yaml（floor 0.6／0.5°）退步：E=**16.96**（合併前 2.27）。消融（Track2 全長，合併後程式）：只關 hold 16.13；只關 floor（`-p floor_sigma_xy:=0 -p floor_sigma_yaw_deg:=0`）**2.277**；floor 與 hold 都關 2.217；floor_xy 0.2（yaw 0.5°）2.349；floor_xy 0.3（yaw 0）2.622。→ 退步來自 master 的 floor 0.6，不是 `zupt_hold`。
 - 處理：**只改 Track2 yaml**，`floor_sigma_xy`／`floor_sigma_yaw_deg` 設 0；Track1／3 yaml 不動。此 yaml 的數值設定與 `mg2nofloor`（E=2.2773，用 `-p` 覆寫跑的）相同，**未另跑純 yaml 版**（跑到一半被停止），引用結果請用 `mg2nofloor` 並註明覆寫。
 - 未解決／備註：Track2 對 ply_scale 與 floor 敏感（8.0／8.3 發散，floor ≥0.3 變差）；Kaggle 尚未提交 Track2。
+
+### Track2 正式結果檔（2026-10-26）
+- `result/Track2_result.txt`（3299 行）、`result_2.csv`（3299 幀＋標頭）取自 run `Track2_mg2nofloor`：程式為 `e4259e2`（含 7e79fdb 之前的 Track2 設定），Track2 yaml 加 `-p floor_sigma_xy:=0.0 -p floor_sigma_yaw_deg:=0.0`；目前 master 的 Track2 yaml 已把這兩項寫成 0，數值設定相同。本地 E=2.2773（rmse_p 1.363、yaw 4.57°，GNSS 參考，3294 幀）。
+- **尚未用目前 master 的純 yaml 重跑驗證逐位元相同**（之前預期相同，未驗證）；Kaggle 尚未提交。
+- 舊的 `Track2_result.txt`（516 行、10/25）是不完整的舊 run，已被取代。

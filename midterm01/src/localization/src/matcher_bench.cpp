@@ -5,7 +5,7 @@
 // 用法：
 //   matcher_bench --method ndt|gicp --map <pcd> --ply_dir <dir> --init <init_guess.txt>
 //                 --out <result.txt> [--stats <stats.csv>] [--max_frames N] [--scale 8]
-//                 [--source_voxel 0.5] [--submap_half 50] [--recrop_dist 10]
+//                 [--source_voxel 0.5] [--max_range 0] [--epsilon 0.01] [--submap_half 50] [--recrop_dist 10]
 //                 [--ndt_resolution 3] [--ndt_step 0.2] [--max_iter 35]
 //                 [--gicp_max_corr 2.0] [--gicp_k 20] [--reject_dist 3.0] [--target_voxel 0]
 //   guess 模式（不追蹤，逐行獨立配準，用來量測收斂域與偏差）：
@@ -46,6 +46,8 @@ struct Options {
     int max_frames = 0;
     double scale = 8.0;
     double source_voxel = 0.5;
+    double max_range = 0.0;     // m，縮放後水平距離上限（與管線的 input_max_range 相同）；0 = 不過濾
+    double ndt_epsilon = 0.01;  // NDT 收斂門檻（管線的 ndt_transformation_epsilon）
     double submap_half = 50.0;
     double submap_half_z = 15.0;
     double recrop_dist = 10.0;
@@ -67,6 +69,7 @@ bool ParseArgs(int argc, char** argv, Options& o) {
     str("--method", o.method); str("--map", o.map); str("--ply_dir", o.ply_dir);
     str("--init", o.init); str("--out", o.out); str("--stats", o.stats); str("--guess_file", o.guess_file);
     num("--max_frames", o.max_frames); dbl("--scale", o.scale); dbl("--source_voxel", o.source_voxel);
+    dbl("--max_range", o.max_range); dbl("--epsilon", o.ndt_epsilon);
     dbl("--submap_half", o.submap_half); dbl("--recrop_dist", o.recrop_dist);
     dbl("--ndt_resolution", o.ndt_resolution); dbl("--ndt_step", o.ndt_step); num("--max_iter", o.max_iter);
     dbl("--gicp_max_corr", o.gicp_max_corr); num("--gicp_k", o.gicp_k); dbl("--reject_dist", o.reject_dist);
@@ -123,7 +126,7 @@ public:
     explicit Matcher(const Options& o) : o_(o) {
         ndt_.setResolution(o.ndt_resolution);
         ndt_.setStepSize(o.ndt_step);
-        ndt_.setTransformationEpsilon(0.01);
+        ndt_.setTransformationEpsilon(o.ndt_epsilon);
         ndt_.setMaximumIterations(o.max_iter);
         gicp_.setMaxCorrespondenceDistance(o.gicp_max_corr);
         gicp_.setCorrespondenceRandomness(o.gicp_k);
@@ -173,8 +176,18 @@ Cloud::Ptr CropSubmap(const Cloud::Ptr& map, const Eigen::Vector3f& center, cons
 Cloud::Ptr LoadSource(const std::string& path, const Options& o) {
     auto raw = std::make_shared<Cloud>();
     pcl::io::loadPLYFile(path, *raw);
-    for (auto& p : raw->points) { p.x *= o.scale; p.y *= o.scale; p.z *= o.scale; }
-    return Voxel(raw, o.source_voxel);
+    auto scaled = std::make_shared<Cloud>();
+    scaled->points.reserve(raw->size());
+    for (auto p : raw->points) {
+        if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) continue;
+        p.x *= o.scale; p.y *= o.scale; p.z *= o.scale;
+        if (o.max_range > 0.0 && std::hypot(p.x, p.y) > o.max_range) continue;  // 與管線 FilterInputCloud 相同：縮放後的水平距離
+        scaled->points.push_back(p);
+    }
+    scaled->width = static_cast<std::uint32_t>(scaled->size());
+    scaled->height = 1;
+    scaled->is_dense = true;
+    return Voxel(scaled, o.source_voxel);
 }
 
 int RunGuessMode(const Options& o, const Cloud::Ptr& map, const std::vector<std::string>& plys) {

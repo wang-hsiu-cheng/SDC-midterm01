@@ -36,6 +36,7 @@ add_library(localization_core
   src/map_manager.cpp
   src/measurement_fusion.cpp
   src/ndt_matcher.cpp
+  src/road_heading_prior.cpp
   src/state_estimator.cpp
 )
 ament_target_dependencies(localization_core

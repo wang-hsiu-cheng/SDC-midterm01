@@ -113,6 +113,13 @@ bool LocalizationApp::LoadParameters() {
     declare_double("ndt_transformation_epsilon", ndt_config_.transformation_epsilon);
     declare_int("ndt_max_iterations", ndt_config_.max_iterations);
 
+    declare_bool("road_heading_enabled", road_heading_config_.enabled);
+    declare_double("road_heading_radius", road_heading_config_.radius);
+    declare_double("road_heading_cell", road_heading_config_.cell);
+    declare_double("road_heading_z_min", road_heading_config_.z_min);
+    declare_double("road_heading_z_max", road_heading_config_.z_max);
+    declare_double("road_heading_max_dev_deg", road_heading_config_.max_deviation_deg);
+
     declare_bool("init_search_enabled", init_search_config_.enabled);
     declare_bool("init_search_dump", init_search_dump_);
     declare_double("init_search_yaw_range_deg", init_search_config_.yaw_range_deg);
@@ -395,6 +402,18 @@ bool LocalizationApp::RunLocalization() {
                 // init_guess 的航向帶雜訊：以 init 與 IMU 姿態航向為中心做多假設 NDT，由地圖匹配挑初值
                 map_manager.Update(init_pose.block<3, 1>(0, 3));
                 matcher.SetTarget(map_manager.submap());
+                if (road_heading_config_.enabled) {
+                    const auto prior = RoadHeadingPrior(road_heading_config_).Estimate(*map_manager.submap(), init_pose);
+                    if (prior.found) {
+                        const double old_yaw = std::atan2(init_pose(1, 0), init_pose(0, 0));
+                        const Eigen::Matrix3f turn =
+                            Eigen::AngleAxisf(static_cast<float>(prior.yaw_rad - old_yaw), Eigen::Vector3f::UnitZ()).toRotationMatrix();
+                        init_pose.block<3, 3>(0, 0) = turn * init_pose.block<3, 3>(0, 0);
+                        guess = init_pose;
+                    }
+                    RCLCPP_INFO(node_->get_logger(), "Road heading prior: %s, wall %.1f deg, deviation from init %.1f deg (%d map points).",
+                                prior.found ? "applied" : "rejected", prior.wall_deg, prior.deviation_deg, prior.points);
+                }
                 std::vector<double> centers{std::atan2(init_pose(1, 0), init_pose(0, 0))};
                 double imu_yaw = 0.0;
                 if (imu.LatestHeading(imu_yaw)) centers.push_back(imu_yaw);

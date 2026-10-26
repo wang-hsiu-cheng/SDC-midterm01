@@ -24,6 +24,14 @@
     ndt_max_iterations: 35
 
 
+    # 第 0 幀以地圖牆面主方向修正 init_guess 的 yaw（只用地圖與 init_guess；差超過 max_dev 就放棄）
+    road_heading_enabled: false
+    road_heading_radius: 30.0
+    road_heading_cell: 0.5
+    road_heading_z_min: -1.0
+    road_heading_z_max: 6.0
+    road_heading_max_dev_deg: 25.0
+
     # 第 0 幀初始位姿搜尋（init_guess 航向有雜訊；以 init 與 IMU 姿態航向為中心，由 NDT probability 挑最佳）
     init_search_enabled: true
     init_search_dump: false       # 診斷：輸出每個起點的結果到 <結果檔>.initsearch.csv

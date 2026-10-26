@@ -85,6 +85,8 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
    - **讓陀螺儀主導 yaw 沒有降低 yaw 誤差**（全長，對 GNSS）：`meas_sigma_yaw_deg` 2→4／8：Track1 E 1.821→1.758／1.768（yaw rms 2.23→2.27／2.40°）、Track2 E 2.277→2.199／2.255（yaw 4.57→4.55／4.46°）；`process_sigma_bias` 1e-4→1e-6：Track1 1.794、Track2 2.275。E 的小幅下降來自**位置**（Track1 1.375→1.304、Track2 1.363→1.290，σ_yaw=4），兩個 track 同方向；yaw 本身沒變。→「NDT yaw 太吵所以要少相信」的假說被否定；σ_yaw=4 是否採用另議（Track3 無 GNSS，只能看陀螺儀一致性）。
    - **地圖牆面主方向當靜止起步的初始 yaw 先驗（可行性，尚未實作）**：在地圖（0.5 m）上取起點周圍 30 m、離地 1 m 以上的點，點密度影像的梯度方向直方圖取主峰（mod 180°），180° 模糊用 init_guess 解。對 GNSS 航向：Track1 第 0 幀誤差 +0.4°（init_guess +2.0°）；**Track2 靜止起點 −4.3°（init_guess −15.2°）**；沿整條軌跡的 |誤差| 中位 3.0°（T1）／3.3°（T2）、p90 6.2°／7.5°、路口有離群值（T2 一個 47°），所以只適合當**初始** yaw，不適合全程量測。**Track3 起點不可用**（半徑 20／30／50 m 的主峰 1.5°／90.5°／91.5°，皆不近 160～167°）。估計 Track2 若起步 yaw 誤差 13.8°→4°，yaw rms 4.57°→約 2.3°，E 約 −0.45。僅用地圖與 init_guess，不用 GNSS。
 
+17. **牆面方向先驗＋σ_yaw=4（10/26，工作區未提交→見 commit）**：新增 `RoadHeadingPrior`（第 0 幀以地圖牆面主方向修正 init_guess 的 yaw，差 >25° 放棄；只用地圖與 init_guess），`road_heading_enabled` 只在 Track2 開；`meas_sigma_yaw_deg` Track1／Track2 改 4.0，Track3 維持 2.0。全長對 GNSS：**Track2 E 2.277→1.751**（yaw rms 4.57→2.91°、位置 1.363→1.169 m；先驗套用，牆面 158.5°、與 init 差 8.9°）；Track1（σ=4，先驗關）E 1.821→1.758。關閉狀態逐位元驗證：Track3 = `Track3_zb0.txt`、Track1（`-p meas_sigma_yaw_deg:=2.0`）= `Track1_result.txt`（yb1）。run：`Track2_rhp2`、`Track1_rhp1s4`、`Track1_rhp1s2`、`Track3_rhp3`。Track3 起點不可用，先驗不開。Kaggle 未提交、官方結果檔尚未更新。
+
 ## 5. 失敗嘗試與設計決策（報告用）
 
 | 嘗試 | 結果 | 結論 |

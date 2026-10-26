@@ -24,6 +24,7 @@
 
 #include "localization/imu_processor.h"
 #include "localization/initial_pose_search.h"
+#include "localization/road_heading_prior.h"
 #include "localization/map_manager.h"
 #include "localization/measurement_fusion.h"
 #include "localization/ndt_matcher.h"
@@ -106,6 +107,7 @@ private:
     MapManager::Config map_config_;
     NdtMatcher::Config ndt_config_;
     InitialPoseSearch::Config init_search_config_;
+    RoadHeadingPrior::Config road_heading_config_;  // 第 0 幀以地圖牆面方向修正 init_guess 的 yaw（預設關閉）
     bool init_search_dump_ = false;  // 診斷：把第 0 幀搜尋的每個起點結果寫成 <save_file>.initsearch.csv
     MeasurementFusion::Config fusion_config_;
     StateEstimator::Config estimator_config_;

@@ -48,9 +48,8 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 | `InitialPoseSearch`（A） | 第 0 幀以 init 與 IMU 姿態 yaw 為中心 ±30°／5°搜尋，NDT probability 選最佳；`init_search_criterion`（預設 probability）、`init_search_dump` |
 | `YawBank`（Track2 分支） | 車速 >1 m/s 後對 yaw 偏移複製多份濾波器追蹤，150 幀後以 fitness 承諾；僅 Track2 開 |
 | 靜止鎖定（E／H2） | `zupt_freeze_yaw`、`zupt_hold`：ZUPT 靜止時不更新 yaw（K 的 yaw 列歸零）、位置不加過程雜訊、z／傾角不混入 NDT；三個 track 開 |
-| 預設關閉的實驗 | `floor_sigma_*`（0）、`floor_adaptive`、`conf_r_scale`、`scale_estimation_enabled`（v1，失敗） |
 
-三份 yaml 的差異（`tools/diff_params.py`）：`ply_scale` 8.5／8.7／7.5；Track1 `init_search_xy_offsets: [0.0]`；Track2：關第 0 幀搜尋、釘住 beta（`init_sigma_beta_deg` 0.01、`process_sigma_beta` 1e-6）、`process_sigma_accel_bias` 0.002、ba 偽量測（`zupt_sigma_accel_bias` 0.01、`zupt_accel_mean_max` 0.08）、`yaw_bank_*` 開。floor 三個 track 都是 0。
+三份 yaml 的差異（`tools/diff_params.py`；floor、信心縮放、線上尺度估計等失敗的實驗旋鈕已全部移除，見 §5）：`ply_scale` 8.5／8.7／7.5；Track1 `init_search_xy_offsets: [0.0]`；Track2：關第 0 幀搜尋、釘住 beta（`init_sigma_beta_deg` 0.01、`process_sigma_beta` 1e-6）、`process_sigma_accel_bias` 0.002、ba 偽量測（`zupt_sigma_accel_bias` 0.01、`zupt_accel_mean_max` 0.08）、`yaw_bank_*` 開。floor 三個 track 都是 0。
 
 工具（`src/localization/tools/`）：`run_track.sh`／`sweep.sh`／`docker_run.sh`（隔離容器，輸出含 manifest）；`analyze_diag.py`（A 採用率、B GNSS 誤差、C 對 IMU 積分的 yaw、D 更新離散度、E 靜止段、F 平滑度）；`decompose_yaw.py`（yaw 差拆成陀螺儀／NDT 修正／零偏）；`pose_vs_imu_attitude.py`（對 IMU 姿態的絕對 yaw）；`eval_init_search.py`（第 0 幀搜尋曲線）；`eval_ate.py`、`extract_bag.py`、`diff_params.py`；`matcher_bench`（`--guess_file` 單幀獨立對齊，可掃尺度）。
 
@@ -111,7 +110,7 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 
 **P3 評估、修剪、文件**
 - [ ] 三 track 記分卡：`analyze_diag.py` 補彙總（T1 E＋平滑度＋起點 rms；T2 E；T3 `final_fitness` 剖面、靜止段、位姿−IMU 偏差）；共用程式變動須三 track 都不退步才合併。
-- [ ] 修剪：`conf_r_scale`、ScaleEstimator v1、自適應 floor（消融後移除沒有貢獻的旋鈕與死碼）。
+- [x] 修剪（10/26 完成）：移除 `conf_r_scale`／`conf_*`、`floor_*`（含自適應）、`fitness_ref`、`ScaleEstimator`、`init_search_criterion` 及對應 yaml 與診斷欄位（`ply_scale`、`floor_scale`）。Track1／2／3 全長與簡化前（正式結果 `yb1`／master 已提交 Track2／`zb0`）逐位元相同。
 - [ ] README（結案時補）：`zupt_*`、`floor_*`、`conf_*`、`init_search_*`、`scale_*`、`yaw_bank_*` 參數；`analyze_diag.py` 各區段與三個新工具。
 - [ ] 三個 `*_D0.txt.initsearch.csv`（第 0 幀搜尋曲線，Track1／2／3）目前是 worktree 的未追蹤檔，要長期留存需另存。
 - [ ] 10/29 前：在 Kaggle 選定三個 track 的 compliant 提交、寄出簡報；11/05 前：報告（Pipeline／Contributions／Problems & Solutions／Workload／Others）、打包 zip。

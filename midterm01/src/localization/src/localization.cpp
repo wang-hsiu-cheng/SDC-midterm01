@@ -38,7 +38,7 @@ int LocalizationApp::Start(int argc, char** argv) {
         return -1;
     }
     diag_file_.open(output_path.string() + ".diag.csv");
-    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,ply_scale,floor_scale\n";
+    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg\n";
 
     if (yaw_bank_enabled_) {
         bank_file_.open(output_path.string() + ".bank.csv");
@@ -113,17 +113,8 @@ bool LocalizationApp::LoadParameters() {
     declare_double("ndt_transformation_epsilon", ndt_config_.transformation_epsilon);
     declare_int("ndt_max_iterations", ndt_config_.max_iterations);
 
-    declare_bool("scale_estimation_enabled", scale_config_.enabled);
-    declare_double("scale_search_ratio", scale_config_.search_ratio);
-    declare_int("scale_candidates", scale_config_.candidates);
-    declare_int("scale_search_interval", scale_config_.interval);
-    declare_double("scale_smoothing", scale_config_.smoothing);
-    declare_double("scale_min_ratio", scale_config_.min_ratio);
-    declare_double("scale_max_ratio", scale_config_.max_ratio);
-    declare_double("scale_min_gain", scale_config_.min_gain);
     declare_bool("init_search_enabled", init_search_config_.enabled);
     declare_bool("init_search_dump", init_search_dump_);
-    declare_string("init_search_criterion", init_search_config_.criterion);
     declare_double("init_search_yaw_range_deg", init_search_config_.yaw_range_deg);
     declare_double("init_search_yaw_step_deg", init_search_config_.yaw_step_deg);
     node_->declare_parameter<std::vector<double>>("init_search_xy_offsets", init_search_config_.xy_offsets);
@@ -178,17 +169,6 @@ bool LocalizationApp::LoadParameters() {
     declare_double("fusion_prior_sigma_yaw_deg", fusion_config_.prior_sigma_yaw_deg);
     declare_double("z_gain", e.z_gain);
     declare_double("tilt_gain", e.tilt_gain);
-    declare_double("fitness_ref", fitness_ref_);
-    declare_double("conf_r_scale", conf_r_scale_);
-    declare_double("conf_spread_max", conf_spread_max_);
-    declare_double("conf_fitness_max", conf_fitness_max_);
-    declare_double("floor_sigma_xy", e.floor_sigma_xy);
-    declare_double("floor_sigma_yaw_deg", e.floor_sigma_yaw_deg);
-    declare_bool("floor_adaptive", e.floor_adaptive);
-    declare_double("floor_ema_alpha", e.floor_ema_alpha);
-    declare_double("floor_noise_alpha", e.floor_noise_alpha);
-    declare_double("floor_z_low", e.floor_z_low);
-    declare_double("floor_z_high", e.floor_z_high);
     node_->declare_parameter<std::vector<double>>("multi_start_lon_offsets", multi_start_lon_offsets_);
     multi_start_lon_offsets_ = node_->get_parameter("multi_start_lon_offsets").as_double_array();
     if (multi_start_lon_offsets_.empty()) multi_start_lon_offsets_ = {0.0};
@@ -383,7 +363,6 @@ bool LocalizationApp::RunLocalization() {
     MapManager map_manager(map_cloud_, map_config_);
     NdtMatcher matcher(ndt_config_);
     StateEstimator estimator(estimator_config_);
-    ScaleEstimator scale_estimator(scale_config_, ply_scale_);
 
     std::int64_t prev_timestamp_ns = 0;
     double bias_sigma = 0.0;  // 0 = 使用 estimator 預設
@@ -400,7 +379,7 @@ bool LocalizationApp::RunLocalization() {
         pcl::PointCloud<pcl::PointXYZ>::Ptr raw_cloud;
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr raw_color;
         if (!LoadPlyFrame(frame, raw_cloud, raw_color)) return false;
-        auto input = FilterInputCloud(ScalePlyPointCloud(raw_cloud, scale_estimator.scale()));
+        auto input = FilterInputCloud(ScalePlyPointCloud(raw_cloud, ply_scale_));
         bool input_ok = static_cast<int>(input->size()) >= min_input_points_;
 
         const bool first = (processed == 0);
@@ -453,28 +432,6 @@ bool LocalizationApp::RunLocalization() {
             imu_yaw_ref += imu_interval.yaw_increment - imu_ref_bias * imu_interval.dt;
         }
         prev_timestamp_ns = frame.timestamp_ns;
-
-        if (scale_estimator.Due(processed)) {
-            // 點雲尺度會隨時間改變（v1 實驗，預設關閉）：以上一幀輸出的位姿為起點，用一組等比候選尺度各對齊一次，
-            // 看哪個尺度對得最好（單起點即可），再以更新後的尺度重建這一幀的輸入點雲
-            const StateEstimator& current = yaw_bank_.active ? yaw_bank_.members[yaw_bank_.BestIndex(yaw_bank_score_)].estimator : estimator;
-            const Eigen::Matrix4f scale_guess = current.pose();
-            if (map_manager.Update(scale_guess.block<3, 1>(0, 3))) matcher.SetTarget(map_manager.submap());
-            if (!map_manager.submap()->empty()) {
-                std::vector<double> scale_fitness;
-                for (const double candidate_scale : scale_estimator.Candidates()) {
-                    const auto candidate = FilterInputCloud(ScalePlyPointCloud(raw_cloud, candidate_scale));
-                    Eigen::Matrix4f aligned;
-                    double candidate_fitness = -1.0, candidate_probability = 0.0;
-                    const bool ok = static_cast<int>(candidate->size()) >= min_input_points_ &&
-                                    matcher.Align(candidate, scale_guess, aligned, candidate_fitness, candidate_probability);
-                    scale_fitness.push_back(ok ? candidate_fitness : -1.0);
-                }
-                scale_estimator.Update(scale_fitness);
-                input = FilterInputCloud(ScalePlyPointCloud(raw_cloud, scale_estimator.scale()));
-                input_ok = static_cast<int>(input->size()) >= min_input_points_;
-            }
-        }
 
         // 對單一濾波器做「預測 → NDT → 更新」；yaw 假設銀行啟用時，每個假設各跑一次
         struct StepResult {
@@ -532,11 +489,7 @@ bool LocalizationApp::RunLocalization() {
                         // 第 0 幀：init_guess 帶雜訊，直接以 NDT 結果作為濾波器初值
                         est.Initialize(merged.pose, est.bias(), bias_sigma);
                     } else {
-                        double r_scale = (fitness_ref_ > 0.0 && r.fitness > fitness_ref_)
-                                             ? std::pow(r.fitness / fitness_ref_, 2) : 1.0;
-                        // 候選一致且配準好 → 這一幀的 NDT 值得多信一點；分散度的額外 R 照舊加在後面
-                        if (r.spread_lon <= conf_spread_max_ && r.fitness <= conf_fitness_max_) r_scale *= conf_r_scale_;
-                        r.info = est.Update(merged.pose, r_scale, merged.spread_cov, r.stationary);
+                        r.info = est.Update(merged.pose, merged.spread_cov, r.stationary);
                     }
                 }
             }
@@ -618,7 +571,7 @@ bool LocalizationApp::RunLocalization() {
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 
         if (publish_frames_) {
-            const auto color = FilterColorCloud(ScalePlyColorCloud(raw_color, scale_estimator.scale()));
+            const auto color = FilterColorCloud(ScalePlyColorCloud(raw_color, ply_scale_));
             PublishFrame(input, color, map_manager.submap(), pose, frame.timestamp_ns);
         }
         WritePose(pose);
@@ -636,15 +589,15 @@ bool LocalizationApp::RunLocalization() {
         diag_file_ << ',' << sigma_lon << ',' << sigma_lat << ',' << sigma_yaw << ',' << result.spread_lon << ',' << result.n_eff << ',' << shown.accel_bias();
         const auto yaw_of = [](const Eigen::Matrix4f& T) { return std::atan2(T(1, 0), T(0, 0)); };
         diag_file_ << ',' << guess_out(0, 3) << ',' << guess_out(1, 3) << ',' << yaw_of(guess_out) << ',' << measured(0, 3) << ','
-                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << scale_estimator.scale() << ',' << shown.floor_scale() << '\n';
+                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << '\n';
         ++processed;
         rclcpp::spin_some(node_);
 
         if (processed == 1 || processed % 100 == 0) {
             RCLCPP_INFO(node_->get_logger(),
-                        "Frame %zu/%zu: v=%.2fm/s bias=%+.4f ba=%+.3f beta=%+.2fdeg pose=(%.1f, %.1f) fit=%.3f infl=%.1f scale=%.2f ms=%.0f",
+                        "Frame %zu/%zu: v=%.2fm/s bias=%+.4f ba=%+.3f beta=%+.2fdeg pose=(%.1f, %.1f) fit=%.3f infl=%.1f ms=%.0f",
                         processed, ply_frames_.size(), shown.speed(), shown.bias(), shown.accel_bias(),
-                        shown.beta() * 180.0 / M_PI, pose(0, 3), pose(1, 3), fitness, info.inflation, scale_estimator.scale(), ms);
+                        shown.beta() * 180.0 / M_PI, pose(0, 3), pose(1, 3), fitness, info.inflation, ms);
         }
     }
     RCLCPP_INFO(node_->get_logger(), "Finished: %zu poses, %zu frames without NDT update, %zu stationary (ZUPT) frames, mean R inflation %.2f.",

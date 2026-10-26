@@ -46,18 +46,6 @@ public:
         double spread_gain = 1.0;            // 候選分散度協方差加進 R 的倍率
         double gate_chi2 = 11.34;            // 3 自由度 99%，超過則按比例放大 R
 
-        // 協方差下限（1-sigma，0 = 不設）：P 在長時間沒有被修正後會塌縮，增益趨近 0，NDT 的修正進不來；
-        // 單純調小 R 而不設下限會讓 σ 過小而局部失控，所以兩者要一起用
-        double floor_sigma_xy = 0.0;         // m
-        double floor_sigma_yaw_deg = 0.0;
-        // 自適應：floor 對每一幀一視同仁會把 NDT 的逐幀雜訊灌進位姿（軌跡抖動，Kaggle 變差）。
-        // 開啟後只在 NDT 創新有持續偏向（模型落後或漂移）時才啟用 floor：創新的短期平均顯著偏離 0 才開
-        bool floor_adaptive = false;
-        double floor_ema_alpha = 0.1;        // 創新短期平均的係數
-        double floor_noise_alpha = 0.02;     // 創新雜訊（方差）估計的係數
-        double floor_z_low = 2.0;            // 偏向顯著性（短期平均／其標準誤）從 low 到 high，floor 由 0 線性開到全開
-        double floor_z_high = 4.0;
-
         // 靜止時的零速／零偏觀測（ZUPT）噪聲
         double zupt_sigma_speed = 0.02;      // m/s
         double zupt_sigma_gyro_rate = 0.002; // rad/s，窗口內陀螺儀均值當零偏觀測
@@ -91,17 +79,15 @@ public:
     // 靜止（IMU 窗口判定）時的偽量測：速度 = 0、陀螺儀均值 = 零偏、前向加速度均值 = 加速度零偏。不改位姿
     void UpdateStationary(double yaw_rate_mean, double forward_accel_mean);
 
-    // T_meas：NDT 的 T_map_body；r_scale：基準 R 的倍率（>1 配準品質差而放大，<1 量測有把握而縮小）；
+    // T_meas：NDT 的 T_map_body；
     // extra_cov：量測在 (x, y, yaw) 地圖座標下的額外協方差（例如多起點候選的分散度）
     // stationary：ZUPT 判定靜止；config.zupt_freeze_yaw 開啟時忽略這一幀量測的 yaw
-    UpdateInfo Update(const Eigen::Matrix4f& T_meas, double r_scale, const Eigen::Matrix3d& extra_cov,
-                      bool stationary = false);
+    UpdateInfo Update(const Eigen::Matrix4f& T_meas, const Eigen::Matrix3d& extra_cov, bool stationary = false);
 
     // 目前位置不確定度沿行進方向／橫向（m）與 yaw（deg）的 1-sigma，診斷濾波器一致性用
     void Sigma(double& lon, double& lat, double& yaw_deg) const;
 
     const Eigen::Matrix4f& pose() const { return pose_; }
-    double floor_scale() const { return floor_scale_xy_; }  // 診斷用：目前 xy 下限的啟用程度（0～1）
     double speed() const { return state_(3); }
     double bias() const { return state_(4); }
     double beta() const { return state_(5); }
@@ -115,13 +101,6 @@ private:
     Vector7 state_ = Vector7::Zero();
     Matrix7 cov_ = Matrix7::Identity();
     Eigen::Matrix4f pose_ = Eigen::Matrix4f::Identity();
-
-    void UpdateFloorScale(const Eigen::Vector3d& innovation, double c, double s);
-
-    Eigen::Vector3d innov_mean_ = Eigen::Vector3d::Zero();  // 車體座標（縱向、橫向、yaw）創新的短期平均
-    Eigen::Vector3d innov_var_ = Eigen::Vector3d::Constant(1.0);
-    double floor_scale_xy_ = 1.0;
-    double floor_scale_yaw_ = 1.0;
 };
 
 }  // namespace localization

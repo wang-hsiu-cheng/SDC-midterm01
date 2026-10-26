@@ -38,10 +38,6 @@ void StateEstimator::Initialize(const Eigen::Matrix4f& pose, double initial_bias
     cov_(5, 5) = std::pow(config_.init_sigma_beta_deg * kDeg2Rad, 2);
     cov_(6, 6) = config_.init_sigma_accel_bias * config_.init_sigma_accel_bias;
 
-    innov_mean_.setZero();
-    innov_var_ << std::pow(config_.meas_sigma_lon, 2), std::pow(config_.meas_sigma_lat, 2),
-        std::pow(config_.meas_sigma_yaw_deg * kDeg2Rad, 2);
-    floor_scale_xy_ = floor_scale_yaw_ = config_.floor_adaptive ? 0.0 : 1.0;
 }
 
 void StateEstimator::Predict(double dt, double yaw_increment_raw, double forward_accel, bool stationary) {
@@ -74,32 +70,10 @@ void StateEstimator::Predict(double dt, double yaw_increment_raw, double forward
     const bool hold = stationary && config_.zupt_hold;
     if (hold) Q(0, 0) = Q(1, 1) = 0.0;
     cov_ = F * cov_ * F.transpose() + Q;
-    if (!hold) {
-        const double floor_xy = std::pow(config_.floor_sigma_xy * floor_scale_xy_, 2);
-        const double floor_yaw = std::pow(config_.floor_sigma_yaw_deg * kDeg2Rad * floor_scale_yaw_, 2);
-        for (const int i : {0, 1}) cov_(i, i) = std::max(cov_(i, i), floor_xy);
-        cov_(2, 2) = std::max(cov_(2, 2), floor_yaw);
-    }
 
     pose_(0, 3) = static_cast<float>(state_(0));
     pose_(1, 3) = static_cast<float>(state_(1));
     ApplyYawDelta(pose_, dpsi);
-}
-
-void StateEstimator::UpdateFloorScale(const Eigen::Vector3d& innovation, double c, double s) {
-    // 車體座標的創新：縱向、橫向、yaw
-    const Eigen::Vector3d r(c * innovation(0) + s * innovation(1), -s * innovation(0) + c * innovation(1), innovation(2));
-    const double a = config_.floor_ema_alpha;
-    innov_mean_ = (1.0 - a) * innov_mean_ + a * r;
-    const Eigen::Vector3d deviation = r - innov_mean_;
-    innov_var_ = (1.0 - config_.floor_noise_alpha) * innov_var_ + config_.floor_noise_alpha * deviation.cwiseAbs2();
-    const double std_err = std::sqrt(a / (2.0 - a));  // 白雜訊下短期平均的標準差相對雜訊標準差的比例
-    const auto significance = [&](int i) { return std::abs(innov_mean_(i)) / (std::sqrt(innov_var_(i)) * std_err + 1e-9); };
-    const auto ramp = [&](double z) {
-        return std::clamp((z - config_.floor_z_low) / (config_.floor_z_high - config_.floor_z_low), 0.0, 1.0);
-    };
-    floor_scale_xy_ = ramp(std::max(significance(0), significance(1)));
-    floor_scale_yaw_ = ramp(significance(2));
 }
 
 void StateEstimator::RotateYaw(double delta) {
@@ -125,8 +99,7 @@ void StateEstimator::UpdateStationary(double yaw_rate_mean, double forward_accel
     state_(3) = std::clamp(state_(3), 0.0, config_.max_speed);
 }
 
-StateEstimator::UpdateInfo StateEstimator::Update(const Eigen::Matrix4f& T_meas, double r_scale,
-                                                  const Eigen::Matrix3d& extra_cov,
+StateEstimator::UpdateInfo StateEstimator::Update(const Eigen::Matrix4f& T_meas, const Eigen::Matrix3d& extra_cov,
                                                   bool stationary) {
     UpdateInfo info;
 
@@ -137,7 +110,6 @@ StateEstimator::UpdateInfo StateEstimator::Update(const Eigen::Matrix4f& T_meas,
     // 基準量測雜訊沿行進方向分解：縱向（NDT 退化方向）給較大的不確定度
     const double heading = state_(2) + state_(5);
     const double c = std::cos(heading), s = std::sin(heading);
-    if (config_.floor_adaptive && !(stationary && config_.zupt_hold)) UpdateFloorScale(innovation, c, s);
     Eigen::Matrix2d Rot;
     Rot << c, -s, s, c;
     Eigen::Matrix2d body_cov = Eigen::Matrix2d::Zero();
@@ -146,7 +118,6 @@ StateEstimator::UpdateInfo StateEstimator::Update(const Eigen::Matrix4f& T_meas,
     Eigen::Matrix3d R0 = Eigen::Matrix3d::Zero();
     R0.topLeftCorner<2, 2>() = Rot * body_cov * Rot.transpose();
     R0(2, 2) = std::pow(config_.meas_sigma_yaw_deg * kDeg2Rad, 2);
-    R0 *= r_scale;
     // 候選分散度反映這一幀的實際曖昧程度：候選一致 → 幾乎不加；縱向分歧 → 縱向 R 變大
     R0 += config_.spread_gain * extra_cov;
 
@@ -162,7 +133,7 @@ StateEstimator::UpdateInfo StateEstimator::Update(const Eigen::Matrix4f& T_meas,
         inflation = info.mahalanobis_sq / config_.gate_chi2;
     }
     const Eigen::Matrix3d R = R0 * inflation;
-    info.inflation = inflation * std::max(1.0, r_scale);
+    info.inflation = inflation;
     S = HPHt + R;
 
     Eigen::Matrix<double, kStateSize, 3> K = cov_ * H.transpose() * S.inverse();

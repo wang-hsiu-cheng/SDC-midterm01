@@ -66,11 +66,6 @@ def section_a(d, x, y):
         yi = d['yaw_minus_imu_deg']
         print('   位姿 yaw − 陀螺儀自第 0 幀積分（診斷檔，扣第 0 幀零偏）：每 500 幀末 %s deg' % (
             ' '.join('%+.1f' % yi[min(b, len(d)) - 1] for a, b in seg)))
-    if 'ply_scale' in d.dtype.names:
-        sc = d['ply_scale']
-        seg = [(a, min(a + 500, len(d))) for a in range(0, len(d), 500)]
-        print('   點雲尺度（ply_scale，線上估計時才會變）：每 500 幀末 %s；範圍 %.2f～%.2f' % (
-            ' '.join('%.2f' % sc[b - 1] for a, b in seg), sc.min(), sc.max()))
     b = d['gyro_bias']
     print('   陀螺儀零偏估計 第 10 幀 %+.4f、最後 %+.4f、範圍 [%+.4f, %+.4f] rad/s（靜止窗口的真實值 Track1/3 約 −0.004）' % (
         b[min(10, len(b) - 1)], b[-1], b.min(), b.max()))

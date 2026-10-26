@@ -24,6 +24,18 @@
     ndt_max_iterations: 35
 
 
+    # 地圖軌跡線（建圖車行駛軌跡、相機高度的細長點雲線）的方向當航向量測；與影像點雲的尺度無關
+    trail_heading_enabled: false
+    trail_heading_z_band: 0.5
+    trail_heading_lon_half: 12.0
+    trail_heading_lat_half: 3.0
+    trail_heading_min_points: 40
+    trail_heading_max_thinness: 0.25
+    trail_heading_min_length: 6.0
+    trail_heading_gate_deg: 12.0
+    trail_heading_sigma_deg: 2.0
+    trail_heading_period_frames: 5
+    trail_heading_when_stationary: false
     # 第 0 幀以地圖牆面主方向修正 init_guess 的 yaw（只用地圖與 init_guess；差超過 max_dev 就放棄）
     road_heading_enabled: false
     road_heading_radius: 30.0

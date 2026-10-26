@@ -99,6 +99,21 @@ void StateEstimator::UpdateStationary(double yaw_rate_mean, double forward_accel
     state_(3) = std::clamp(state_(3), 0.0, config_.max_speed);
 }
 
+void StateEstimator::UpdateHeading(double delta, double sigma) {
+    const double yaw_before = state_(2);
+    const double s = cov_(2, 2) + sigma * sigma;
+    const Vector7 k = cov_.col(2) / s;
+    state_ += k * delta;
+    state_(2) = WrapAngle(state_(2));
+    state_(3) = std::clamp(state_(3), 0.0, config_.max_speed);
+    const Matrix7 I_KH = Matrix7::Identity() - k * Matrix7::Identity().row(2);
+    cov_ = I_KH * cov_ * I_KH.transpose() + k * (sigma * sigma) * k.transpose();
+    cov_ = 0.5 * (cov_ + cov_.transpose());
+    ApplyYawDelta(pose_, WrapAngle(state_(2) - yaw_before));
+    pose_(0, 3) = static_cast<float>(state_(0));
+    pose_(1, 3) = static_cast<float>(state_(1));
+}
+
 StateEstimator::UpdateInfo StateEstimator::Update(const Eigen::Matrix4f& T_meas, const Eigen::Matrix3d& extra_cov,
                                                   bool stationary) {
     UpdateInfo info;

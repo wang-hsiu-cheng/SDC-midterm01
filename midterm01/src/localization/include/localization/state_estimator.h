@@ -79,6 +79,9 @@ public:
     // 靜止（IMU 窗口判定）時的偽量測：速度 = 0、陀螺儀均值 = 零偏、前向加速度均值 = 加速度零偏。不改位姿
     void UpdateStationary(double yaw_rate_mean, double forward_accel_mean);
 
+    // 外部航向量測（例如地圖軌跡線的方向）：delta = 量測 yaw − 目前 yaw（已包到 ±π），sigma 為量測標準差（rad）
+    void UpdateHeading(double delta, double sigma);
+
     // T_meas：NDT 的 T_map_body；
     // extra_cov：量測在 (x, y, yaw) 地圖座標下的額外協方差（例如多起點候選的分散度）
     // stationary：ZUPT 判定靜止；config.zupt_freeze_yaw 開啟時忽略這一幀量測的 yaw

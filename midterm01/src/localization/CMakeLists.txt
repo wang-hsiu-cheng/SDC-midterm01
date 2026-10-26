@@ -38,6 +38,7 @@ add_library(localization_core
   src/ndt_matcher.cpp
   src/road_heading_prior.cpp
   src/state_estimator.cpp
+  src/trail_heading.cpp
 )
 ament_target_dependencies(localization_core
   rclcpp

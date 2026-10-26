@@ -38,7 +38,7 @@ int LocalizationApp::Start(int argc, char** argv) {
         return -1;
     }
     diag_file_.open(output_path.string() + ".diag.csv");
-    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg\n";
+    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,trail_delta_deg,trail_applied\n";
 
     if (yaw_bank_enabled_) {
         bank_file_.open(output_path.string() + ".bank.csv");
@@ -113,6 +113,17 @@ bool LocalizationApp::LoadParameters() {
     declare_double("ndt_transformation_epsilon", ndt_config_.transformation_epsilon);
     declare_int("ndt_max_iterations", ndt_config_.max_iterations);
 
+    declare_bool("trail_heading_enabled", trail_config_.enabled);
+    declare_double("trail_heading_z_band", trail_config_.z_band);
+    declare_double("trail_heading_lon_half", trail_config_.lon_half);
+    declare_double("trail_heading_lat_half", trail_config_.lat_half);
+    declare_int("trail_heading_min_points", trail_config_.min_points);
+    declare_double("trail_heading_max_thinness", trail_config_.max_thinness);
+    declare_double("trail_heading_min_length", trail_config_.min_length);
+    declare_double("trail_heading_gate_deg", trail_config_.gate_deg);
+    declare_double("trail_heading_sigma_deg", trail_config_.sigma_deg);
+    declare_int("trail_heading_period_frames", trail_config_.period_frames);
+    declare_bool("trail_heading_when_stationary", trail_config_.when_stationary);
     declare_bool("road_heading_enabled", road_heading_config_.enabled);
     declare_double("road_heading_radius", road_heading_config_.radius);
     declare_double("road_heading_cell", road_heading_config_.cell);
@@ -569,6 +580,18 @@ bool LocalizationApp::RunLocalization() {
         const Eigen::Matrix4f measured = result.measured;
         if (converged && !first) inflation_sum += info.inflation;
         if (result.stationary) ++stationary_frames;
+        double trail_delta_deg = std::nan("");
+        int trail_applied = 0;
+        if (trail_config_.enabled && !yaw_bank_.active && !first && converged && trail_config_.period_frames > 0 &&
+            processed % static_cast<std::size_t>(trail_config_.period_frames) == 0 && (!result.stationary || trail_config_.when_stationary) &&
+            !map_manager.submap()->empty()) {
+            const auto trail = TrailHeading(trail_config_).Estimate(*map_manager.submap(), estimator.pose(), estimator.yaw());
+            if (trail.found) {
+                trail_delta_deg = trail.delta_rad * 180.0 / M_PI;
+                estimator.UpdateHeading(trail.delta_rad, trail_config_.sigma_deg * M_PI / 180.0);
+                trail_applied = 1;
+            }
+        }
         if (!converged && !first) ++skipped_updates;
 
         // 車開始移動才建立 yaw 假設銀行：靜止時沒有視差，單幀的 NDT 對 yaw 沒有鑑別力
@@ -608,7 +631,7 @@ bool LocalizationApp::RunLocalization() {
         diag_file_ << ',' << sigma_lon << ',' << sigma_lat << ',' << sigma_yaw << ',' << result.spread_lon << ',' << result.n_eff << ',' << shown.accel_bias();
         const auto yaw_of = [](const Eigen::Matrix4f& T) { return std::atan2(T(1, 0), T(0, 0)); };
         diag_file_ << ',' << guess_out(0, 3) << ',' << guess_out(1, 3) << ',' << yaw_of(guess_out) << ',' << measured(0, 3) << ','
-                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << '\n';
+                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << trail_delta_deg << ',' << trail_applied << '\n';
         ++processed;
         rclcpp::spin_some(node_);
 

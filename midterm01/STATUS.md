@@ -1,412 +1,123 @@
 # STATUS — SDC 2026 Midterm01 Localization
 
-> 最後更新：2026-10-26（A、B、C、E／H2 已合進 master；Track2 收斂分支 `worktree-track2-scale` 已合入 master 的最新內容）。每次工作結束時更新本檔（任務勾選、實驗紀錄、待決問題）。
-> 跑測試、並行 sweep、背景執行與容器隔離的規範見 `TESTING.md`（跑任何測試前先讀）。
+> 最後更新：2026-10-26 深夜（壓縮版）。規則與環境見 `CLAUDE.md`，測試與容器隔離見 `TESTING.md`。
+> 完整舊版（含全部原始實驗表與推理）：`git show 55c0918:midterm01/STATUS.md`。本檔只留「現況、結論、失敗嘗試、待辦、待決」；實驗只記關鍵數字與 commit，細節進 git 歷史。
+> 每次結案更新：§2 現況、§4 結論、§5 失敗嘗試、§6 待辦、§7 待決。
 
 ## 1. 截止與計分
 
-| 項目 | 時間 |
+截止：Kaggle 選定 compliant 提交＋簡報寄出 **10/29 09:00**；課堂簡報 10/29；E3 zip（程式＋報告＋result_1/2/3.csv＋README）11/05 23:59。
+
+| Track | 幀數 | 權重 | Baseline | GNSS（僅本地評估） |
+|---|---|---|---|---|
+| Track1 | 3011 | 0.3 | public 1.79（已通過） | 有 |
+| Track2 | 3299 | 0.3 | 未知 | 有（bag 475 筆，`data/Track2/ref/gnss.csv`） |
+| Track3 | 3142 | 0.4 | public 1.29／private 1.40 | **無** |
+
+排名分數：第 1／2／3 名 56r／52r／48r、前 50% 42r、前 75% 36r、其餘高於 baseline 30r、低於 baseline 0 分。每日 15 次提交。`E = RMSE(Δp[m]) + 0.2·RMSE(Δθ[deg])`。
+
+## 2. 現況
+
+### Kaggle 與本地結果
+| Track | 版本（commit／設定） | 本地 E（GNSS） | Kaggle public | 備註 |
+|---|---|---|---|---|
+| T1 | `5597dfe`：候選軟加權＋加速度零偏，無 A、無 floor | 1.79 | **1.56** | 已過 baseline；平滑度基準（加速度中位 0.0128） |
+| T1 | `047f72a`：floor 0.6＋A 搜 xy 格＋hold | 1.7328 | **1.62** | 退步；逐幀抖動 2.9 倍（加速度中位 0.0374） |
+| T3 | 舊版 ply_scale 8.5、無 ZUPT | — | 3.98 | |
+| T3 | ply_scale 7.5＋零偏先驗＋ZUPT（`257c97c`） | — | 2.46 | |
+| T3 | A＋E（`6e289ca`） | — | 2.01 | |
+| T3 | A＋E＋hold＋floor 0.6（H2，`f81f508`） | — | **1.93** | 距 baseline 1.29 仍差 0.64 |
+| T2 | 收斂版，floor 0（`mg2nofloor`） | 2.2773 | 未提交 | `result_2.csv` 已提交；先前全部設定發散（E 218–670） |
+
+### 結果檔與 yaml 的對應（提交前必須處理）
+- master 的 `Track1_result.txt`／`result_1.csv` 是 floor 0.6＋xy 偏移格的版本（Kaggle 1.62）；`Track3_result.txt`／`result_3.csv` 也是 floor 0.6 時期的版本。**目前三份 yaml 的 floor 都是 0、Track1 的 `init_search_xy_offsets` 是 `[0.0]`，兩者與已提交結果不符**（規則 6），提交前要用目前程式與 yaml 重新產生。
+- Track3 候選：`zb0`（floor 0、hold 開，純 yaml，只在 worktree 的未追蹤結果裡）。Track2 純 yaml 版尚未重跑驗證逐位元相同（現有的是 `-p` 覆寫的 `mg2nofloor`）。
+- master 工作區的 `build/`、`install/` 常是舊的（git 不會更新它們）：在 master 跑之前先 `colcon build`。
+
+### 資料
+Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊全；Track2 資料與 map 快取已齊。PLY：x 前、y 左、z 上、無絕對尺度；幀間隔中位 36 ms；init_guess 的 roll／pitch 有雜訊（Track3 明顯）；PLY body 持續有 roll −6～−8°、pitch 1～6°。
+
+## 3. 程式與參數現況
+
+流程：PLY→前處理（尺度、30 m 範圍、體素 0.5 m）→NDT 多起點（縱向 0／±1.5／±3 m，軟加權＋逐幀協方差）→7 狀態 EKF（x、y、yaw、v、陀螺零偏、行進偏角 beta、加速度零偏）；IMU 預測、ZUPT。`localization.cpp` 只做流程與 I/O。
+
+| 元件 | 說明 |
 |---|---|
-| Kaggle 截止＋選定最終提交、寄出簡報 | **2026-10-29 09:00** |
-| 課堂簡報（4–6 分鐘） | 2026-10-29 |
-| E3 zip（程式＋報告＋result_1/2/3.csv＋README） | 2026-11-05 23:59 |
+| `ImuProcessor`／`StateEstimator`／`NdtMatcher`／`MeasurementFusion`／`MapManager` | IMU causal 積分與靜止判定；EKF；NDT；候選融合；子地圖快取 |
+| `InitialPoseSearch`（A） | 第 0 幀以 init 與 IMU 姿態 yaw 為中心 ±30°／5°搜尋，NDT probability 選最佳；`init_search_criterion`（預設 probability）、`init_search_dump` |
+| `YawBank`（Track2 分支） | 車速 >1 m/s 後對 yaw 偏移複製多份濾波器追蹤，150 幀後以 fitness 承諾；僅 Track2 開 |
+| 靜止鎖定（E／H2） | `zupt_freeze_yaw`、`zupt_hold`：ZUPT 靜止時不更新 yaw（K 的 yaw 列歸零）、位置不加過程雜訊、z／傾角不混入 NDT；三個 track 開 |
+| 預設關閉的實驗 | `floor_sigma_*`（0）、`floor_adaptive`、`conf_r_scale`、`scale_estimation_enabled`（v1，失敗） |
 
-| Track | 幀數 | 權重 r | Baseline | GNSS | 備註 |
-|---|---|---|---|---|---|
-| Track1 | 3011 | 0.3 | 待確認（Kaggle） | 有 | 另有 3cameras_ply |
-| Track2 | 3299 | 0.3 | 待確認（Kaggle） | 有 | map 含 tl/th 欄位，不使用 |
-| Track3 | 3142 | 0.4 | private 1.40 | **無** | public 只評前 5–40% |
+三份 yaml 的差異（`tools/diff_params.py`）：`ply_scale` 8.5／8.7／7.5；Track1 `init_search_xy_offsets: [0.0]`；Track2：關第 0 幀搜尋、釘住 beta（`init_sigma_beta_deg` 0.01、`process_sigma_beta` 1e-6）、`process_sigma_accel_bias` 0.002、ba 偽量測（`zupt_sigma_accel_bias` 0.01、`zupt_accel_mean_max` 0.08）、`yaw_bank_*` 開。floor 三個 track 都是 0。
 
-排名分數：第 1 名 56r、第 2 名 52r、第 3 名 48r、前 50% 42r、前 75% 36r、其餘高於 baseline 30r、低於 baseline 0 分。Kaggle 每日上限 15 次提交。
-評分公式：`E = RMSE(Δp[m]) + 0.2 · RMSE(Δθ[deg])`。
+工具（`src/localization/tools/`）：`run_track.sh`／`sweep.sh`／`docker_run.sh`（隔離容器，輸出含 manifest）；`analyze_diag.py`（A 採用率、B GNSS 誤差、C 對 IMU 積分的 yaw、D 更新離散度、E 靜止段、F 平滑度）；`decompose_yaw.py`（yaw 差拆成陀螺儀／NDT 修正／零偏）；`pose_vs_imu_attitude.py`（對 IMU 姿態的絕對 yaw）；`eval_init_search.py`（第 0 幀搜尋曲線）；`eval_ate.py`、`extract_bag.py`、`diff_params.py`；`matcher_bench`（`--guess_file` 單幀獨立對齊，可掃尺度）。
 
-## 2. 資料狀態
+## 4. 已確認的結論（依證據強度）
 
-| Track | 狀態 | 內容 |
+1. **影像點雲縱向可觀測性差**：候選縱向分散中位 1.13 m，NDT 單幀只能把誤差往真值拉約 19%；累積多幀點雲、調 Q／R 都無法補救（NDT 量測誤差在時間上相關且貼著預測）。速度唯一可靠來源是加速度積分，所以 ZUPT 與加速度零偏是必要的。
+2. **ZUPT**（Track3 停等段約第 900–2200 幀）：累積位移 6.6→1.5 m、yaw 漂移 19°→3.5°、零偏 −0.011→−0.0035～−0.0041（靜止窗口真值 −0.0041，Track1／3 同感測器）、轉彎 NIS 244→11；Kaggle 3.98→2.46。
+3. **初始航向（A）**：Track3 init_guess yaw 偏約 21.5°（init 145.7°、IMU 姿態 167.2°），A 選 162.1°，Kaggle 2.46→2.01。第 0 幀 NDT probability 對 yaw 是**寬平台**（Track3 13°、Track1 更寬、Track2 近乎全平），單幀 argmax 是雜訊；fitness 準則在 Track1／2 的最差航向誤差 3.5°／8.6°（probability 2.0°／25.2°），但在 Track3 約 60 幀後軌跡與 probability 版重合、無影響；Track3 的 `YawBank` 在前 150 幀對 yaw 沒有鑑別力（−10°～+10° 的 fitness 差 2%），不採用。
+4. **A 的 xy 偏移格在 Track1 有害**：把起點移 (+1.8,+1.2) m，前 300 幀對 GNSS rms 1.49→2.16；只搜 yaw 即回到舊版水準。Track3 的 A 選出的 xy 與 init_guess 只差 0.25 m。
+5. **floor（提高增益的補丁）不是解法**：Track1 逐幀抖動 2.9 倍、Kaggle 1.56→1.62；Track2 E 2.27→16.96（只關 hold 仍 16.13，只關 floor 回 2.277）；Track3 靜止段路徑長 3.9→22.6 m，只換到 −0.08。自適應 floor 抖動只降 29～44%；`conf_r_scale` 從未觸發。三個 track 已全關。
+6. **評估標準**：GNSS 只有約 4 Hz、雜訊約 0.7 m、固定偏移約 0.5 m，分不出 0.05～0.17 的差距與逐幀抖動，本地 E 與 Kaggle 方向曾相反（1.79→1.7328 但 Kaggle 1.56→1.62）。調參要同時看平滑度（F 區段：位置二階差，T1 舊版 0.0128、floor 0.6 0.0374、floor 0 的 `zb0`（T3）0.0089）與對齊品質；Kaggle 才反映抖動。
+7. **靜止鎖定有效**（Track3 第 948–2179 幀路徑長／淨位移）：ZUPT 時期 4.08／1.29 m；H2（floor 0.6＋hold）3.12／1.81；僅 floor 0.6 22.85／2.38；**`zb0`（floor 0＋hold）1.99／0.64**。H1 曾因 K 的 yaw 列沒歸零，位置創新經交叉協方差把 yaw 轉了 5.3°。`zb0` 在第 2178 幀起步沒有跳動（H2 跳 (−0.44,−1.63) m，是 floor 造成）。
+8. **Track3 點雲尺度（以 `zb0` 位姿單幀掃尺度）**：行駛段（100–800 幀）最佳尺度穩定在 7.5；停車段只有一次 +20% 階躍（約第 1550–1650 幀，7.44→9.0，加「對齊後位移 <0.5 m」約束後乾淨，無約束的「7.0」是尺度與平移耦合的假象）；第 2200 幀起步後回到約 7.0–7.5。偏離只出現在無視差的停車期間，且 hold 已隔離，**預期收益小**。轉彎與轉彎後的最佳尺度散在 6.5–9.0，與尺度無關。
+9. **轉彎中輸出位姿可能偏數公尺**：第 2600／2650 幀 NDT 找到的最佳對齊離輸出位姿 5.66／6.37 m（2650 幀 fitness 0.270→0.214）；第 2800／2850 幀 2.88／2.14 m 但 fitness 不變（縱向退化方向漫遊）。轉彎後 fitness 約 0.28–0.29（轉彎前 0.22）。與人工觀察「轉彎無法匹配、轉彎後縱向 >5 m」一致。限制：單幀、無真值，只能說 NDT 在別處找到更好的對齊。
+10. **+5° 航向殘餘**（位姿相對陀螺儀積分）：在第 100–1000 幀長出，其中 NDT 修正 +3.25°、零偏估計與真值差 +1.82°；人工看「順轉 5° 更匹配」，與數字一致。不由第 0 幀決定（從 162° 與 167° 出發，100 幀後重合）。原因未明。
+11. **Track2 收斂**（分支 `worktree-track2-scale`，已合入 master）：Track2 以穩定 0.33 m/s² 起步，被誤判成靜止，真實加速度被當成零偏；做法＝ZUPT 加「窗口加速度均值要接近 ba」＋靜止時對 ba 做偽量測、`YawBank`、釘住 beta、ply_scale 8.7（穩定帶 8.5–9.0）。純 yaml E=2.274。
+12. **配準器**：G-ICP 不取代 NDT（收斂域較寬但有固定偏差且純追蹤每幀跳 2–3 m）；NDT 用 resolution 3、多起點。
+13. **地圖中吻合行駛軌跡的點雲（助益）**：相機高度、沿行駛軌跡有一層點雲，轉彎也吻合、Track1～3 都有（使用者觀察）。Track1 數據：相機上方 0～+1 m 那一層有 84／151 個位置呈線狀，主軸與 GNSS 航向差中位 1.3°、橫向距離中位 0.25 m（std 0.65），比目前 NDT 量測（yaw 約 2.3°、橫向約 0.9 m）好；只約束航向與橫向，不約束縱向。真實來源（疑似建圖車自己的軌跡）與 Track2／3 是否同樣成立尚未驗證。**能否用作航向／橫向先驗見 §7（合規未確認）。**
+
+## 5. 失敗嘗試與設計決策（報告用）
+
+| 嘗試 | 結果 | 結論 |
 |---|---|---|
-| Track1 | ✅ `/root/data/Track1` | raw_ply、3cameras_ply、map.pcd、map_downsampled_1m.pcd、init_guess、db3、images |
-| Track2 | ⏸ 待 Track1 驗證程式功能正常後由使用者自行下載 | — |
-| Track3 | ✅ `/root/data/Track3` | raw_ply、map.pcd、init_guess、db3（無 GNSS）、images；尚無 map 快取 |
+| 舊 clamp／coast／速度 EMA | 約 1750 幀起發散（E 75.6）；yaw 追不回→整幀被拒→速度被拉低鎖死 | 全部移除，改 IMU＋不鎖死 EKF |
+| G-ICP 取代 NDT（bench） | 純追蹤 E 93–133、每幀跳 2–3 m | 不採用 |
+| 多起點取 probability argmax | 在模式間翻轉，E 3.88 | 改軟加權＋以預測為中心的先驗＋候選分散度進 R（E 1.99→1.79） |
+| 一致性校準（只降 R／加大 Q） | E 9.49／2.00／1.91，不如 1.79 | 維持預設；NDT 誤差時間相關，調 Q／R 無法同時誠實又更準 |
+| 累積多幀局部點雲（K=4／10） | E 1.94／487（發散），耗時 ×1.6／×3.3 | 移除 |
+| floor 0.6（全域） | 見 §4-5 | 全關 |
+| 自適應 floor、`conf_r_scale` | 抖動降一半／從未觸發 | 待修剪 |
+| 線上尺度估計 v1（每 3 幀 5 個等比候選，單起點 NDT 比 fitness） | T1 E 1.7328→2.238（尺度 7.29–11.47）；T3 尺度掉到下限 5.62，與固定位姿掃描方向相反；fitness 變好但位置變差 | 失敗；單幀 fitness 選尺度會讓尺度吸收錯位（耦合）。預設關閉，待修剪 |
+| `init_search_criterion=fitness` | Track3 約 60 幀後與 probability 版重合 | 保留參數，預設 probability |
+| Track3 `YawBank` | 承諾 0°，各假設 fitness 差 2%；軌跡與基準非逐位元相同（子地圖共用），輸出在假設間切換造成粗糙 | 不採用 |
+| Track2：掃尺度、搜尋步長、關 yaw 凍結、釘 beta、放寬縱向先驗、加雜訊 | 全長皆發散（E 218–670） | 真因是速度損失（ba 被帶偏），見 §4-11 |
 
-觀察：
-- PLY 軸向為 x 前、y 左、z 上，沒有絕對尺度（深度約 0.2–5 單位）。
-- 幀間隔中位數 36 ms；Track3 有 11.7 ms 的近重複幀。
-- init_guess 的 roll/pitch 也有雜訊（Track3 較明顯）。
+## 6. 待辦清單
 
-## 3. 程式現況
+**P0 提交前**
+- [ ] 用目前程式與 yaml 重新產生並提交 Track1／Track3 正式結果（`Track1_result.txt`／`result_1.csv`、`Track3_result.txt`／`result_3.csv`；Track3 候選 `zb0`）；Track2 純 yaml 重跑驗證（逐位元對 `mg2nofloor`）。
+- [ ] 回歸：關閉我的功能時三個 track 與已提交結果逐位元相同（Track2 分支只驗到 `e4259e2`，之後的 merge 與 yaml 改動尚未驗）。
+- [ ] Track1 提交版本：新版（floor 0＋xy `[0.0]`，尚無 Kaggle 分數）或 `5597dfe` 版（1.56）。
 
-**保留（基礎設施，重構時搬到新結構）**
-- `localization.cpp`：`IndexPlyFiles`、`TimestampNsFromPlyFilename`、`LoadPlyFrame`、`LoadInitialPose`、`LoadMap`（含 cache）、`CropSubmap`、`WritePose`、`ToTransformStamped`/`ToPoseStamped`、`PublishFrame`/`PublishGlobalMap`、`RigidInverse`、`IsFinite`
-- `map_modified.cpp` + launch（10/25 重構：hash 體素降採樣、ROI、稀疏體素剔除、依 leaf 自動命名）
-- `visualization.cpp` + launch + `visualization.rviz`（10/25 重構：重播 result.txt＋PLY、參考軌跡、多幀疊加、倍速/區段播放）
-- `include/localization/ply_sequence.h`：PLY 索引與位姿檔讀取（header-only，之後核心重構可沿用）
-- `localization.launch.py`、`txt_to_idx_x_y_yaw.py`
+**P1 Track3 的主要缺口：轉彎與轉彎後**（方案 D 已刪除；尺度 G／H 暫擱置，見 §4-8）
+- [ ] 診斷轉彎中輸出位姿偏在哪個方向（縱／橫）、何時開始偏、偏多少（用 `zb0` 與 NDT 最佳對齊的位移分量、yaw rate、速度）。
+- [ ] 候選方向（待討論，皆未驗證）：運動模型的槓桿臂（前鏡頭在後軸前方，轉彎時側向速度約 L·ω）；轉彎中降低 NDT 縱向權重／以 yaw rate 約束；地圖軌跡點雲當航向／橫向先驗（§7 合規未確認前不實作）；遠距點降權（人工觀察前 800 幀右側遠處建築距離似有問題）。
 
-**廢棄（有缺陷，全部重構）**
-- `RunLocalization` 主迴圈：NDT 呼叫、縱/橫/垂直修正量 clamp、coast 機制、前進軸自學習、速度 EMA
-- `AlignNDT`、`CameraCorrection`（pitch/yaw offset hack）、`ScalePly*` 中固定的 `ply_scale`
-- `coarse_to_fine_gicp.*`、`motion_predictor.*`、`scale_solver.cpp`
-- `LoadDB3Frame`/`OpenDB3File`（目前是空殼）
-- yaml 中對應上述功能的參數
-
-**已知問題**
-- ~~`map_modified` 小 leaf 時 PCL VoxelGrid 溢位~~ → 10/25 已重寫為 hash 體素降採樣（1 m 結果與舊版逐點一致 496,909 點；0.5 m = 1,796,100 點）
-- `localization.launch.py` 的 `bag_path` 預設寫死 `Track1.db3`
-- ~~`txt_to_idx_x_y_yaw.py` import 了 `savgol_filter`/`gaussian_filter1d`~~ → 10/25 已移除未使用的第三方 import（腳本現在只做格式轉換，且不依賴 pandas/scipy）
-- `result/` 內現有結果（Track1 98 行、Track3 31 行）都是不完整的舊 run，不具參考價值
-
-## 4. 目標架構（重構藍圖）
-
-依 PDF Flow：點雲處理 ＋ 地圖處理 → Scan Matching → State Update。
-
-```
-PLY ──► FramePreprocessor ──┐
-                            ├─► ScanMatcher ──► StateEstimator ──► WritePose / Publish
-map ──► MapManager(submap) ─┘        ▲                │
-IMU ────────────────────────────────────────── predict ┘
-```
-
-| 模組 | 職責 |
-|---|---|
-| `FramePreprocessor` | 套用尺度、範圍/FOV 裁切、天空/離群點去除、voxel 降採樣 |
-| `MapManager` | 離線產生 binary PCD 快取；以滑動 tile 快取產生子地圖，避免每幀對全圖做 CropBox |
-| `ScanMatcher`（介面） | NDT / GICP 實作可切換；支援尺度估計（Sim3 或尺度搜尋）；初始化時做多假設（yaw/位置）搜尋 |
-| `StateEstimator` | IMU 角速度＋等速模型預測、causal 量測更新、退化方向與發散處理（取代舊的 clamp hack） |
-| `BagReader` | 從 db3 讀 IMU（以及 Track1/2 的 GNSS，用於評估），並依 PLY 時間戳對齊 |
-| `LocalizationNode` | 只負責流程調度、I/O 與 publish |
-| `tools/eval_ate.py` | 以 GNSS 為參考計算 Kaggle 指標（Track1/2 本地評估用） |
-
-## 5. 任務清單
-
-### P0 — 10/25 準備
-- [x] 讀規格、盤點 workspace、寫 CLAUDE.md / STATUS.md
-- [x] （使用者）Track1 驗證完成後下載 Track2
-- [x] 重構地圖降採樣 `map_modified` 與離線視覺化 `visualization`（含 launch、rviz）
-- [x] 產生 map 快取：Track1 1 m / 0.5 m、Track3 1 m（Track2 待下載後產生）
-- [x] bag 讀取：`tools/extract_bag.py` → `data/TrackN/ref/{imu,gnss}.csv`（Track3 無 GNSS）
-- [x] `tools/eval_ate.py`：GNSS 參考軌跡＋Kaggle 公式（時間插值、yaw wrap）
-- [x] 評估 G-ICP 是否取代 NDT（`matcher_bench`，見 §7）→ **結論：不採用 PCL G-ICP 取代 NDT**
-- [x] 移除 `txt_to_idx_x_y_yaw.py` 未使用的 pandas／numpy／scipy（含平滑函式）import（原本在無這些套件的環境無法執行）
-- [x] launch 的 `bag_path` 預設改為 `<data_path>/<目錄名>.db3`
-
-### P1 — 10/26 重構骨架＋第一版跑通
-- [x] 拆除廢棄程式（coarse_to_fine_gicp / motion_predictor / scale_solver），建立 `ImuProcessor` / `MapManager` / `NdtMatcher` / `StateEstimator`（編進 `localization_core`）；主節點只剩 I/O 與流程
-- [ ] 尺度實驗：固定尺度 vs 每幀估計，用 Track1 GNSS 驗證
-- [~] 第一版 NDT＋EKF：Track1 全長跑通（E=3.88），Track3 尚未跑（無 GNSS，只能看 diag 與 Kaggle）
-- [x] 第一次本地評估並記錄
-
-### P2 — 10/27 精度
-- [x] IMU 融合進 StateEstimator（陀螺儀 yaw＋零偏狀態、姿態扣重力的前向加速度）
-- [x] 第 0 幀初始化的全域/多假設搜尋（init_guess 有雜訊）→ 方案 A，見「下一輪」與 §7（Track2 尚未解決，交給 F）
-- [ ] Track3 調參（權重最高）
-- [ ] 第一批 Kaggle 提交（三個 track）
-
-### P3 — 10/28 穩健與定稿
-- [ ] 發散偵測與重定位
-- [ ] 三個 track 參數定稿（各自的 yaml 或 launch 參數）
-- [ ] README：完整重現指令
-- [ ] 簡報
-
-### 下一輪 — 10/25 晚規劃（新 session 接手：先修初始航向，再處理 NDT 採用率）
-
-**起點**：Track1 Kaggle public 1.56（助教 baseline 1.79，已通過）；Track3 public 3.98 → 2.46（助教 baseline 1.29，尚未通過；2.46 = ply_scale 7.5＋零偏先驗＋ZUPT）；Track2 尚未提交，使用者測試發現初始旋轉錯誤、手動改初始位姿會高速飄移。使用者的視覺觀察：Track1／Track3 對齊時很準，但「每 4–5 幀才準確匹配一次，其餘時間相機點雲持續變、車子位置沒更新」；靜止仍有微幅旋轉、左轉時遠處特徵對不上、要很久才校正；垂直特徵（牆角、路燈）是好的參照物；LiDAR 地圖在相機高度附近沿行駛軌跡有兩條點雲。
-
-**這輪用現有數據查到的事（唯讀分析，無新定位 run）**
-1. **Track3 的初始航向錯了約 20°，且花約 1100 幀（40 s）才被 NDT 修正**（先前 §7 的「Track3 診斷與尺度」把「初始位姿誤差」排除了，那次只檢查了位置與傾角，排除得太早）。
-   - 位姿 yaw 相對 IMU 積分 yaw（陀螺儀 up 軸投影，扣靜止窗口量到的真實零偏 −0.0041）：第 300 幀 +14.4°、600 幀 +16.0°、900 幀 +18.3°、1100 幀 +20.3°、1950 幀 +20.9°、2200 幀 +21.8°、左轉後 2500／2750／3100 幀 +18.6°／+16.0°／+13.3°。前 300 幀位姿 yaw 變 +11.6°，同期 IMU 只 −2.8°（車在直行）。
-   - IMU 姿態的絕對 yaw 與 init_guess 的差：Track1 −2.5°（IMU 132.7°／init 135.1°）、**Track2 +7.7°**（−22.7°／−30.4°）、**Track3 +21.5°**（167.2°／145.7°）。Track3 位姿收斂後的航向約 166.3°，與 IMU 航向約 164.3° 只差約 2°（Track1 的 IMU−GNSS 為 −0.4°～−4°，同量級）。→ init_guess 的 yaw 在 Track3 偏了約 20°，Track2 偏約 8°。
-2. **靜止旋轉只有 0.57°**（第 1100–1950 幀：位姿 +0.64° vs IMU +0.07°）。ZUPT 有效；左轉時的錯位主因是上面的航向偏差，不是靜止旋轉。
-3. **NDT 每幀都提議不小的修正，但濾波器只套用其中 2–5%**：NDT 與預測的位置差中位／p90＝0.361／0.823 m（Track1）、0.264／0.888 m（Track3）；實際套用的修正中位 0.0124／0.0059 m，只有 3.0%／4.2% 的幀修正 >5 cm，NIS 中位 0.32／0.19。→ 使用者看到的「很少更新」是增益太小（R＝基準＋候選分散度遠大於 P），不是門檻。注意：先前「調高增益會變差」（§7「濾波器一致性」）是以 GNSS 為參考，而 GNSS 有約 0.5 m 偏移與取樣雜訊，可能低估 NDT 量測的品質；Kaggle GT 很可能是地圖定位的結果。
-4. 影像幀時間間隔很規律（Track1／2／3 皆 36 ms，4–5 幀沒有週期）→「每 4–5 幀」不是時間戳造成的。
-5. 地圖（Track1，0.5 m 版）在相機高度附近（相對相機 dz −1～+1）、路徑正上方（|橫向|<1 m）點密度很高（每 0.5 m 一格 1300–2000 點，與兩側牆面相當），地面在相機下方約 1–2 m；dz 0～+1 在橫向 −0.8 m 有一個強峰（2027）。支持「沿行駛軌跡有假結構」，但此解析度下分不出明確的兩條，需使用者確認是不是同一個東西。
-
-**方案（依預期效益排序）**
-- [x] **A（最高）第 0 幀的初始航向／位姿搜尋**（已實作並合進 master：`InitialPoseSearch`；init 與 IMU 姿態 yaw 為中心 ±30°／5°×3×3 位置偏移，NDT probability 選最佳。Track3 解決；Track1 搜尋後 yaw 與 init 相同；**Track2 未解決**：選出的 yaw 隨搜尋範圍與 ply_scale 在 10°～51° 間游移，frame 0 的 NDT 景觀太平，留給 F）（causal，只用第 0 幀與 IMU，不用 GNSS）：對多個 yaw 假設各跑一次 NDT（以 init_guess 的 yaw 與 IMU 姿態 yaw 為中心，±30° 每 5°，必要時再加小範圍位置偏移），以 NDT probability／fitness 選最佳者當初值；IMU 姿態只負責「提出候選」，最後由地圖匹配決定。檔案：`LocalizationApp::RunLocalization` 的第 0 幀分支（`src/localization.cpp`）、新增小元件（如 `InitialPoseSearch`，重用 `NdtMatcher::Align`、`MapManager`）、`ImuProcessor` 補「取得第 0 幀時刻 IMU 姿態 yaw」；參數進**三份** yaml（`init_search_yaw_range_deg`、`init_search_yaw_step_deg` …），改完用 `tools/diff_params.py` 檢查。預期：Track3 前 1100 幀航向偏差從約 20° 降到數度以內，直接影響 public 評分範圍（約第 157–1257 幀）；Track2 的初始旋轉錯誤也由此處理（多半是起點離收斂域太遠，搜尋比手動調準）。
-- [x] **B 用「輸出位姿與地圖的對齊度」當不依賴 GNSS 的評估指標**（已實作：diag 多 `final_fitness`、`yaw_minus_imu_deg` 兩欄，`analyze_diag.py` 的 A 區段會印；`NdtMatcher::FitnessAt`）：diag 新增 `final_fitness`（最終位姿對子地圖的 NDT fitness／probability）與位姿 yaw 對 IMU 積分 yaw 的差；Track3 沒有 GNSS，這兩個加上 Kaggle public（每日 15 次，僅作方法比較，不可用來反推微調，規則 3）是唯一依據。
-- [~] **C 讓濾波器採用「有把握的」NDT 結果**（**10/26 晚更正：floor 在 Track1 造成逐幀抖動（Kaggle 1.56→1.62）、在 Track2 發散，已證實只是提高增益的補丁，見「待辦清單 — 10/26 晚」；Track2 yaml 已設 0**。原記：floor_sigma_xy 0.6／yaw 0.5° 已於 10/26 設為三份 yaml 預設，conf_r_scale 仍關閉（前 300 幀無效，未驗證）；原：`conf_r_scale`／`conf_spread_max`／`conf_fitness_max` 信心縮放、`floor_sigma_xy`／`floor_sigma_yaw_deg` 協方差下限；第一組設定 0.5／0.2 m／0.5° 使 Track1 E 1.908 → 1.779，尚未調參、尚未決定各 track 預設值，見 §7）（解決「很少更新」）：增益隨信心調整——候選分散度小、fitness 好時用小 R，並對 P 設下限（covariance floor）避免增益塌縮（先前單純調小 R 會讓 σ 過小而失控，見 §7 一致性試驗 A）。用 B 的指標評估，不只看 GNSS。
-- [ ] **D 地圖與來源點雲的垂直特徵強化**：目標子地圖排除「自車軌跡帶」（預測位姿周圍半徑約 2.5–3 m、相機高度帶內的點）與地面（相機下方 >1 m），來源點雲排除近距離與地面，保留牆面、直角、路燈。檔案：`MapManager::Update`（`src/map_manager.cpp`）、`FilterInputCloud`（`src/localization.cpp`）；參數進三份 yaml（如 `map_ego_exclusion_radius`、`map_min_dz`、`input_min_range`）。
-- [x] **E 靜止時凍結 yaw**（小項）：ZUPT 判定靜止時略過 NDT 的 yaw 更新（`zupt_freeze_yaw`，已合進 master；靜止段 1100–2200 幀轉動 +1.6° → +1.1°，仍有殘留 +0.5°，原因未查）。
-- [x] **F Track2**：**Track2 已收斂**（分支 `worktree-track2-scale`，細節與限制見 §7「Track2 收斂」）。更正：Track2 的 bag 有 `/localizer_node/gnss_pose`（475 筆），`data/Track2/ref/{gnss,imu}.csv` 可做 GNSS 本地評估。做法：①靜止窗口的前向加速度均值觀測加速度零偏 ba、ZUPT 加「窗口加速度均值要接近 ba」避免起步被誤判成靜止（`zupt_sigma_accel_bias`、`zupt_accel_mean_max`，僅 Track2 開）；②第 0 幀搜尋對 Track2 無效（與上面 A 的結論一致），改為車速 >1 m/s 後用 `YawBank` 多 yaw 假設追蹤、以 fitness 承諾最佳者（僅 Track2 開）；③Track2 yaml：ply_scale 8.7（穩定帶 8.5–9.0）、釘住 beta、收緊 ba 過程雜訊。
-
-**驗證（控制耗時，先用 600–1200 幀）**
-- A：Track3 前 1200 幀 → 位姿 yaw 與 IMU 積分 yaw 的差是否從 +14～21° 降到數度；`final_fitness` 是否下降；Track1 不退步（本地 E 仍 ≈1.79 或更好，Track1 的第 0 幀搜尋結果應與原 init 一致）；Track2 前 600 幀看是否不再高速飄移。
-- C／D：分別開關，用 Track1 GNSS（E、縱向 rms、>1.5 m 累積段）＋`final_fitness`＋yaw 一致性一起看，不單看 E。
-- 每次：只用第 0..k 幀與 IMU（causal）、無 GNSS 進演算法、無後處理、參數在 yaml、可重現；實作並驗證後才 commit，merge／push 另行詢問。
-
-**方法備忘（分析腳本在 session 暫存目錄、不在 repo，這裡記下做法以便重做）**
-- 位姿 yaw vs IMU 積分 yaw：對 `ref/imu.csv`（`tools/extract_bag.py` 產生）每個樣本取 IMU 姿態四元數得到「up 在 IMU 座標系的方向」，角速度投影到 up 並扣掉靜止窗口量到的零偏（Track1／Track3 皆 −0.004 rad/s），累積積分，內插到 PLY 時間戳，與結果檔的 yaw（`atan2(r21, r11)`，unwrap）相減。
-- NDT 採用率：diag 的 `meas_*`（NDT 量測）、`pred_*`（預測）與結果檔位姿三者相減。
-- 地圖密度：讀 `map_downsampled_0.5m.pcd`（二進位），每隔 40 幀取路徑位姿，統計 ±6 m 縱向內、依相對相機高度分層的橫向直方圖。
-
-**地圖中與相機等高、吻合行駛軌跡的點雲（10/25 晚觀察；決定：暫不使用，排行榜衝刺階段再另寫一個版本）**
-- 使用者觀察：LiDAR 地圖在與相機等高處，有一條點雲軌跡與車子實際移動軌跡幾乎吻合，轉彎也吻合，Track1～3 都有。
-- 我的數據（Track1，`map_downsampled_0.5m.pcd`、位姿用 f_new 結果、GNSS 僅作離線對照）：
-  - **更正**：第一次分析用「沿航向的長方形」選點，得到「很清楚的線、與航向只差 0.8°」，那是選取框造成的假象（框內即使點均勻分佈，PCA 也會得到約 5 倍長寬比，且方向被偏向位姿航向）。改用與航向無關的圓形選取後，相機高度 ±1 m 整體是圓團（半徑 3／5／7 m 的線性度中位數 1.32／1.32／1.22，像線的比例 1%／4%／0%）。
-  - 但在**相機上方 0～+1 m 這一層**（半徑 4 m）有 84／151 個位置呈線狀（線性度 >2；開頭只有 3／25、結尾 1／25，中間每 500 幀 11–19／25）：主軸與 GNSS 航向差中位 1.3°、p90 4.8°；線到 GNSS 參考位置的垂直距離中位 +0.25 m、std 0.65 m（GNSS 參考本身有約 0.5 m 偏移與雜訊）；線到我們位姿的距離中位 +0.97 m（std 0.45 m），與先前量到的「我們相對 GNSS 橫向偏 +0.5 m」同向。→ 使用者的觀察得到支持：它貼著測試車實際走過的位置，航向資訊約 1–2°、橫向約 0.3–0.6 m，都比目前 NDT 量測（yaw 約 2.3°、橫向約 0.9 m）好。
-  - 尚未驗證：Track2／Track3 是否同樣成立；這層點的真實來源（建圖車自己？其他車輛？護欄？）；沿路徑縱向的位置資訊（線只約束航向與橫向）。
-- **為什麼暫不使用（合規疑慮）**：這條軌跡很可能是建圖時車子自己留在地圖裡的痕跡；若測試資料就是同一趟路徑，它等於測試車真實軌跡的紀錄。規則 5 明確禁止使用 Track2 地圖的 `tl`／`th`（意外遺留的時間戳），性質相近；違規的後果是該 track 0 分，TA 會重跑驗證。依 CLAUDE.md「不確定是否合規時先問」，使用者決定：**先做其他方案（A、C、D），把觀察記錄下來；等最後要衝排行榜時，另外寫一個版本，連同 GNSS 先驗一起套用到 Track1 的版本。** 在得到確認前不做任何使用這條軌跡的實作（也收回先前「軌跡當第 0 幀 yaw 候選之一」的想法）。
-- **衝突提醒（需團隊與助教確認，尚未獲准）**：「GNSS 先驗」直接違反 CLAUDE.md §1 規則 4（演算法內一律不使用 GNSS，團隊決議，三個 track 皆同；GNSS 只可作 Track1/2 本地評估參考）。若日後要做，必須先①團隊同意推翻規則 4、②向助教確認競賽規格是否允許（含軌跡先驗與 GNSS 先驗），③該版本不得被選為最終的 compliant 提交（Kaggle 在 10/29 09:00 前要選定 compliant 提交），④寫成獨立的 yaml／launch 開關，預設關閉，且在報告中如實說明。建議寄信給助教（neal516.en14@nycu.edu.tw）。
-
-**待確認（給使用者）**
-- 方案 A 會用 IMU 姿態 yaw 當「候選」（最終由 NDT 決定），IMU 資料規格上允許使用，我認為合規；若有疑慮請先說。
-- ~~「兩條點雲軌跡」是否就是路徑正上方的高密度帶？~~ 使用者確認它吻合實際行駛軌跡（轉彎也吻合、三個 track 都有）；它是自車軌跡帶，所以方案 D 的「排除自車軌跡帶」仍適用（排除它作為 NDT 的假結構），而不是拿它來定位——使用方式見上一段的合規疑慮。
-
-### 待辦清單 — 10/26 晚（宏觀檢討後；完整推理見 `~/.claude/plans/elegant-pondering-gem.md`）
-
-**宏觀判斷**：A~E 只有 A 有大效果（Track3 2.46→2.01）；C／E／H2 與其後的自適應 floor、conf、ScaleEstimator v1 都只是在調「多相信量測多少」，而量測本身有問題（Track3 點雲尺度在停車期間階躍 −13%～−17%，固定 `ply_scale` 把 NDT 位姿拉偏 1–2 m），且每個改動只在單一 track／單一路段驗證、評估標準（GNSS 4 Hz、雜訊 ~0.7 m）解析度不到 0.05～0.17 的差距。方向改為：**先修量測與初始化，並以三 track 記分卡把關任何共用程式變動**。
-
-**P0 現況與待決（先於任何新功能）**
-- [ ] 分支 `worktree-diag-final-fitness`（merge commit c420e81，已併入 master 7e79fdb）合進 master：待使用者同意；併入後尚未做任何驗證 run（使用者指示不要自動跑）。需要時的回歸：Track1 前 300 幀與全長（E=1.7328）、Track2（mg2nofloor E=2.2773）、Track3 與 H2 `cmp`。
-- [x] Track2 關 floor 後 E=2.27（`mg2nofloor` 2.2773，與併入前 2.274 相同）；使用者先前回報的 2.7 是筆誤。**消融定案：破壞 Track2 的只有 floor**（只關 hold 仍 16.13、只關 floor 回到 2.2773），`zupt_hold` 與 E 的 K 增益歸零對 Track2 沒有副作用，不需再單獨消融。
-- [ ] **floor 預設**：共用程式預設關閉；Track1 yaml 的 `floor_sigma_xy` 0.6 是否改回 0（Kaggle 1.56 版平滑度）；Track3 是否保留，用 `analyze_diag.py` F 區段比較 AE（無 floor，Kaggle 2.01）與 H2（floor 0.6，Kaggle 1.93），抖動可接受才保留。
-- [ ] **Track1 提交版本**：目前 master 的 `result_1.csv` 是 floor 0.6（Kaggle 1.62）；1.56 的版本是 commit `5597dfe`（本地 E 1.79，無 A）。
-- [x] **A 的 xy 偏移格**（P0-5 驗證原因：只搜 yaw 時 Track1 前 300 幀回到舊版水準 rms 1.49，預設格 2.16；**已採用：Track1 yaml 設 `init_search_xy_offsets: [0.0]`，Track2／3 yaml 不動**；Track1 的正式結果檔需重新產生）：Track1 起點被 A 移 (+1.8,+1.2) m（舊版 (−0.7,+0.8)→新版 (+1.1,+2.0)）；驗證 `init_search_xy_offsets: [0.0]`（Track1 前 300 幀，起點誤差與前 300 幀 rms 是否回到舊版 1.24/1.66）。
-
-**P1 Track3 量測尺度（最大的缺口）**
-- [ ] **2a 全程尺度剖面（診斷，不改演算法）**：以 H2 的位姿為起點，每 50 幀對 `ply_scale` 6.5–10 做單幀對齊（`matcher_bench` guess 模式），看最佳尺度在行駛段是否也大幅漂移。決定做 G 或多假設。
-- [ ] **G**：只在 ZUPT 靜止時估計尺度，並要求對齊後位姿位移要小（固定位姿掃描中，正確尺度位移 <0.2 m、錯誤尺度 1～3 m）。等於把驗證時有效的條件直接搬進演算法。缺點：只能修靜止段發生的尺度變化，行駛段的尺度漂移處理不到。
-- [ ] **H**：比較候選時固定點數與距離範圍，去掉 fitness 的點數偏差（G、2b 的共同前處理）。
-- [ ] **2b**（2a 顯示全程漂移時）：把 `YawBank` 泛化為 `HypothesisBank`，假設＝yaw 與尺度，以視窗累積的 fitness／NIS／位姿一致性延後承諾。
-- [ ] 遠距點降權（候選；需先有資料支持：人工觀察右側遠處建築距離異常、軌跡左右晃動）。
-
-**P2 初始化**
-- [x] （**負面**，見 §7 zb1）Track3 打開 Track2 的 `YawBank`（前 100 幀 yaw 在 NDT 平台上游移，之後 +5° 殘餘；單幀 argmax 不可靠）。驗證：位姿−IMU 姿態的絕對偏差、前 300 幀 `final_fitness`。
-- [ ] 殘餘觀察：第 800–1000 幀（減速停車）長出的 +5° 航向差，NDT 修正貢獻 77%；人工看起來「順轉 5° 更匹配」，與數字一致。
+**P2 較小**
+- [ ] +5° 航向殘餘（第 800–1000 幀）、前 150 幀匹配與旋轉差異、等紅燈約領先 LiDAR 1 m。
 
 **P3 評估、修剪、文件**
-- [ ] **三 track 記分卡**：`analyze_diag.py` 補彙總（Track1 E＋平滑度＋起點 rms；Track2 E；Track3 `final_fitness` 剖面、靜止段路徑長、位姿−IMU 偏差、尺度剖面）。共用程式變動須三 track 都不退步才合併；關閉新功能時逐位元 `cmp`。
-- [ ] **修剪**：`conf_r_scale`（從未觸發）、ScaleEstimator v1（失敗，E 1.7328→2.238）、自適應 floor（抖動只降一半）——消融後移除沒有貢獻的旋鈕與死碼。
-- [ ] **README**（結案時補）：`zupt_hold`、`zupt_freeze_yaw`、`floor_*`、`conf_*`、`init_search_*`、`scale_*`、`yaw_bank_*` 參數；`analyze_diag.py` 的 A／D／E／F 區段與 `decompose_yaw.py`、`pose_vs_imu_attitude.py`、`eval_init_search.py`。
-- [ ] 三個 `*_D0.txt.initsearch.csv`（Track1／2／3 第 0 幀搜尋曲線）目前只是 worktree 的未追蹤檔，要長期留存需另存。
-- [ ] Track3 Kaggle 現況：master 目前 `result_3.csv` 是使用者重跑的版本（f9ea40f）；已知分數 A+E 2.01、floor 版 1.93。
+- [ ] 三 track 記分卡：`analyze_diag.py` 補彙總（T1 E＋平滑度＋起點 rms；T2 E；T3 `final_fitness` 剖面、靜止段、位姿−IMU 偏差）；共用程式變動須三 track 都不退步才合併。
+- [ ] 修剪：`conf_r_scale`、ScaleEstimator v1、自適應 floor（消融後移除沒有貢獻的旋鈕與死碼）。
+- [ ] README（結案時補）：`zupt_*`、`floor_*`、`conf_*`、`init_search_*`、`scale_*`、`yaw_bank_*` 參數；`analyze_diag.py` 各區段與三個新工具。
+- [ ] 三個 `*_D0.txt.initsearch.csv`（第 0 幀搜尋曲線，Track1／2／3）目前是 worktree 的未追蹤檔，要長期留存需另存。
+- [ ] 10/29 前：在 Kaggle 選定三個 track 的 compliant 提交、寄出簡報；11/05 前：報告（Pipeline／Contributions／Problems & Solutions／Workload／Others）、打包 zip。
 
-**使用者人工檢視的已知現象（Track3 H2，用來判斷之後的修正有沒有真的有效）**：前 800 幀右側遠處建築距離似有問題、軌跡左右晃動；第 900 幀停車有一次校正跳動；等紅燈位置約領先 LiDAR ~1 m，順轉 5° 更匹配；第 1200～1600 幀點雲尺度持續縮小；第 1700 幀為匹配左側垂直特徵向左跳 ~2 m；轉彎過程無法匹配、軌跡晃動；轉彎後縱向誤差 >5 m（最終橫向 ~2 m、縱向 ~20 m）；轉彎後的直行段匹配與更新頻率正常。
+**使用者人工檢視（Track3 H2，用來判斷之後的修正是否真的有效）**：前 800 幀右側遠處建築距離似有問題、軌跡左右晃動；第 900 幀停車有一次校正跳動；等紅燈位置約領先 LiDAR 1 m、順轉 5° 更匹配；第 1200–1600 幀點雲尺度持續縮小；第 1700 幀為匹配左側垂直特徵向左跳約 2 m（H2 位姿本身在此幀沒動，應是點雲與地圖的相對錯位）；轉彎過程無法匹配、軌跡晃動；轉彎後縱向誤差 >5 m（最終橫向約 2 m、縱向約 20 m）；轉彎後直行段匹配與更新頻率正常。
 
-### 10/29 09:00 前
-- [ ] 在 Kaggle 選定三個 track 的 compliant 提交
-- [ ] 寄出簡報
+## 7. 待決問題
 
-### 11/05 前
-- [ ] 報告（Pipeline / Contributions / Problems & Solutions / Workload / Others）
-- [ ] 打包 E3 zip
+- [ ] **地圖軌跡點雲（疑似建圖車自己的軌跡）可否用作航向／橫向先驗？** 使用者判斷是助益。它性質接近規則 5 禁止的 Track2 `tl`／`th`（意外遺留），若測試與建圖是同一趟路徑，等於測試車軌跡的紀錄；違規後果是該 track 0 分。**未確認前不實作**；建議寄信助教確認（neal516.en14@nycu.edu.tw）。
+- [ ] 排行榜衝刺版本想連同 GNSS 先驗套用到 Track1：直接違反規則 4（演算法內不使用 GNSS，團隊決議），需團隊同意推翻並向助教確認；該版本不得當作最終 compliant 提交，寫成預設關閉的獨立開關並在報告中說明。
+- [ ] 是否使用 3cameras_ply（只有 Track1／2）或自行用 MapAnything 產生 Track3 點雲？
+- [ ] 組號（Kaggle team name）、兩位成員學號；Track2 的 baseline 分數。
+- 已決：GNSS 演算法內三個 track 都不使用，只作 Track1／2 本地評估；A 以 IMU 姿態 yaw 當搜尋「候選」（最終由 NDT 決定）視為合規。
 
-## 6. 待決問題
+## 8. 關鍵實驗（commit／設定→結果）
 
-- [x] 尺度：**8.0**（使用者實測較佳）。是否隨時間漂移仍待觀察
-- [x] GNSS：**三個 track 演算法內都不使用**；僅作 Track1/2 離線評估參考（2026-10-25 決議）
-- [ ] 是否使用 3cameras_ply（只有 Track1/2 有）或自行用 MapAnything 產生 Track3 點雲？
-- [ ] 組號（Kaggle team name）、兩位成員學號
-- [ ] Track1/2 的 baseline 分數
-- [ ] 地圖中吻合行駛軌跡的點雲（疑似建圖車自己的軌跡）可否用作航向／橫向先驗？性質接近規則 5 的 `tl`／`th` 遺留，**未確認前不使用**；建議問助教
-- [ ] 排行榜衝刺版本想連同 GNSS 先驗套用到 Track1：與規則 4（演算法內不使用 GNSS，團隊決議）衝突，需團隊同意推翻並向助教確認；該版本不得當作最終 compliant 提交
-
-## 7. 實驗紀錄
-
-| 日期 | commit | Track | 設定摘要 | 本地 E（GNSS 參考） | Kaggle public | 備註 |
-|---|---|---|---|---|---|---|
-| 10/25 | 工作區（03654ae+未提交） | T1 前 600 幀 | 現有方案（NDT r3 + 限幅/coast），scale 8 | 3.10（rmse_p 2.12, yaw 4.92°） | — | 使用者正在跑的全長 run，取前 600 幀 |
-| 10/25 | bench | T1 前 600 幀 | 純追蹤：等速預測＋配準、無限幅，NDT r3 / 1 m 地圖 | 10.66 | — | 發散 |
-| 10/25 | bench | T1 前 600 幀 | 同上，NDT r2 / 0.5 m 子地圖 | 57.5 | — | 發散 |
-| 10/25 | bench | T1 前 600 幀 | 同上，G-ICP / 1 m 地圖 | 92.9 | — | 600 幀中 455 幀被拒（每幀修正 2–3 m） |
-| 10/25 | bench | T1 前 600 幀 | 同上，G-ICP / 0.5 m 子地圖 | 132.5 | — | 578 幀被拒 |
-| 10/25 | bench guess 模式 | T1 22 幀 × 7 擾動 | 單幀配準，起點=GNSS xy/yaw（roll/pitch/z 取自現有結果）±1 m 縱/橫、±3° | NDT r2 1.22、r3 1.25、r5 2.11；G-ICP c1 1.84、c2 2.33、0.5 m c1 2.06 | — | 詳見下方分析 |
-
-| 10/25 | 工作區舊版 | T1 全長（跑到 2481/3011 被手動停止） | 舊 NDT r3＋限幅/coast，scale 8 | 75.6（rmse_p 71.9, yaw 18.7°）；前 1700 幀 ≈ 2.4–3.1 | — | 約 1750 幀起發散，見下方分析 |
-| 10/25 | worktree imu-ekf | T1 全長 | EKF＋IMU，單起點 NDT r2，accel_gain 1，psp 0.3 | 4.21（rmse_p 3.54, yaw 3.34°） | — | **不發散**；但對參數極敏感，見下 |
-| 10/25 | 同上 | T1 全長 | 消融：accel_gain 0（只靠 NDT 修速度） | 571 | — | 車幾乎不動（v≈0），NDT 縱向拉不動，加速度計是必要的 |
-| 10/25 | 同上 | T1 全長 | 單起點 NDT，改 psp 0.1／0.6、r3、lon 0.5／2.0 | 49／27／68／39／99 | — | 全部發散：縱向一旦偏 >幾 m，NDT 拉不回 |
-| 10/25 | 同上 | T1 全長 | 多起點（縱向 0,±1.5,±3，取 NDT probability 最大），r2 | 577（4 組皆是） | — | 起步即被拉向「後方」候選，v 被學成≈0 後鎖死 |
-| 10/25 | 同上 | T1 全長 | 多起點＋r3：psp 0.1／0.3／0.6、lon 0.5／2.0 | 3.88／3.81／107／3.75／3.79 | — | 除 psp 0.6 外穩定 |
-| 10/25 | 同上（預設值） | T1 全長 | 多起點＋r3、psp 0.1（現行 yaml 預設） | **3.88**（rmse_p 3.18, yaw 3.51°） | — | 確定性可重現；前 300 幀 rmse 7.0 m（lon +4.4）、1800–2400 幀 yaw 偏 +5.6° |
-| 10/25 | worktree imu-ekf | T1 全長 | 使用者新版 run：ply_scale 8.5、r3、多起點(argmax)、psp 0.1（舊 yaml 預設） | **2.25**（rmse_p 1.76, yaw 2.44°） | — | 對照 ply_scale 8.0 的 3.88：縱向系統性偏差 +2.6→−0.3 m，尺度是縱向偏差主因 |
-| 10/25 | 同上 | T1 前 600 幀 | 8.5＋尺度搜尋／最大距離 30／20／FOV60 | 2.78／2.47／47.2／2.84 | — | 尺度搜尋只改善 yaw 且慢 10×；FOV 無影響（點雲本就在 ±60° 內）；20 m 發散、30 m 小幅改善 |
-| 10/25 | 同上 | T1 全長 | 最大距離 30 | 1.99（rmse_p 1.57） | — | 縱向 rms 1.46→1.27 |
-| 10/25 | 同上 | T1 前 600 幀 | 最大距離 30＋process_sigma_xy 0.3／1.0 | 3.20／3.24（對照 2.47） | — | 調大增益只是灌入 NDT 雜訊 |
-| 10/25 | 工作區（本次 commit） | T1 全長 | 候選軟加權＋逐幀協方差＋加速度零偏狀態，r3、30 m | **1.79**（rmse_p 1.34, yaw 2.23°） | — | 見下方「縱向累積延遲」分析 |
-| 10/25 | 同上 | T1 全長 | 同上，process_sigma_speed 0.3／ndt_resolution 2 | 2.09／250（發散） | — | res 2＋多起點仍會發散，resolution 固定 3 |
-| 10/25 | 工作區 | T1 全長 | 一致性校準 A：R 設為實測創新雜訊（0.45/0.33/1.2°）、spread_gain 0.15 | 9.49（縱向 rms 9.06） | — | σ 更小、局部失控（縱向 9 m）；只降 R 有害 |
-| 10/25 | 同上 | T1 全長 | B：A＋process_sigma_xy 0.15／yaw 0.015 | 2.00 | — | NEES 縱向 8.1×；>1.5 m 段中位 17 幀但段數 5→11 |
-| 10/25 | 同上 | T1 全長 | C：A＋process_sigma_xy 0.3／yaw 0.03／speed 0.2 | 1.91 | — | NEES 縱向 5.6×、橫向 4.9×；段中位 19 幀、段數 11；仍不如 f_new（1.79） |
-| 10/25 | 工作區 | T3 前 300 幀 | ply_scale 7.5／8.0／8.5／9.0／9.5（Track3，無 GNSS） | — | — | 自洽度：零偏估計 −0.009／−0.007／**−0.046**／−0.051／+0.013（真值 −0.0041，由 IMU 靜止窗口得到，僅診斷）；NIS 1.5／3.4／**4.8**／3.5／3.9；第 300 幀位置相對 7.5 差 0／3.6／**10.1**／10.1／61 m（9.5 發散） |
-| 10/25 | 工作區（本次 commit） | T3 前 900 幀 | 零偏先驗 −0.004 (σ 0.003)＋ply_scale 7.0／7.25／7.5／7.75／8.0 | — | — | fitness 中位 0.232／0.224／**0.223**／0.225／0.236；第 899 幀五組最大差距僅 2.0 m、7.5 為中位；第 10 幀零偏 ≈ −0.0042（先驗生效）；之後所有尺度零偏都漂到 ≈ −0.0076（原因未明）。→ Track3 採 7.5 |
-| 10/26 | worktree init-pose-search（未提交，同 6e289ca 原始碼） | T3 前 1200 幀 | A：初始位姿搜尋（yaw ±30°/5°，xy 偏移 0/±2 m），track3 yaml，無 -p 覆寫 | — | — | init yaw 145.7° → 162.1°（IMU 167.2°）；位姿 yaw − IMU 積分 yaw：第 300 幀 +14.2° → −0.2°、第 1100 幀 +20.2° → +5.8°；隔離容器重跑逐位元相同 |
-| 10/26 | 同上 | T3 前 2200 幀 | 同上 | — | — | 殘餘 +6° 在第 800–1000 幀（減速停車）長出，之後維持 +6～+7°（原因未查）；靜止段 1100–2200 幀位姿轉 +1.6°（IMU 0°）；NDT 提議中位 0.271 m，實際套用中位 0.0052 m（2.6% 幀 >5 cm） |
-| 10/26 | 同上 | T1 全長 | A，track1 yaml，無 -p 覆寫 | **1.908**（rmse_p 1.48, yaw 2.16°） | — | 搜尋後 yaw 135.1° 同 init；**沒有同一份程式的關閉搜尋基準**，不能判斷與 STATUS 記的 1.79 的 0.12 差距是否由 A 造成（基準 run 因計畫變更中止，輸出不完整、不引用） |
-| 10/26 | 同上 | T2 前 600 幀 | A，track2 yaml（ply_scale 8.0）；-p init_search_yaw_range_deg 30／60／180 | —（無 GNSS） | — | 選出 yaw 10.0°／34.5°／34.5°（init −30.4°，IMU −22.7°），fit 0.31／0.29／0.29；**A 未解決 Track2** |
-| 10/26 | 同上 | T2 第 0 幀 | -p max_frames:=1 -p init_search_yaw_range_deg:=60，ply_scale 7.0／7.5／8.0／8.5／9.0 | — | — | 選出 yaw 39.4°／51.2°／34.5°／35.6°／37.5°，probability 9.62／9.70／9.54／9.47／9.45：ply_scale 不是主因，frame 0 的 NDT 景觀平坦、yaw 不唯一 |
-| 10/26 | 6e289ca（A＋E；結果由同份原始碼在 commit 前產生） | T3 全長 | A＋E（zupt_freeze_yaw），track3 yaml，無 -p 覆寫 | — | **2.01**（A 之前 2.46；助教 baseline 1.29） | 3142 幀；位姿 yaw − IMU 積分 yaw：第 300 幀 −0.2°、第 2355 幀 +6.9°、左轉後第 2748 幀 +1.9°；靜止段 1100–2200 幀 +1.1°；結果檔 `Track3_result.txt`／`result_3.csv`（master 已追蹤） |
-| 10/26 | worktree diag-final-fitness（B，未提交時的工作區） | T3 前 2200 幀 | B：新增診斷欄位，track3 yaml，-p max_frames:=2200 | — | — | 位姿與 master 已提交 `Track3_result.txt` 前 2200 行逐位元相同（診斷不影響演算法）；final_fitness 中位 0.227、p90 0.249，每 500 幀中位 0.235／0.229／0.218／0.230／0.228；位姿 yaw − 陀螺儀自第 0 幀積分每 500 幀末 +1.2／+4.7／+5.0／+6.2／+6.2°（以第 0 幀零偏積分，與先前用靜止窗口零偏算的 +7.3° 同量級） |
-| 10/26 | worktree diag-final-fitness（C，未提交時的工作區） | T1 全長 | C 關閉（預設值），track1 yaml，無 -p 覆寫 | 1.9083（rmse_p 1.4759） | — | 與 A1 逐位元相同（3011 行）→ 新參數預設關閉時不改行為；同時是目前程式的 Track1 基準（Track1 沒有 ZUPT 幀，E 不影響） |
-| 10/26 | 同上 | T1 全長 | C 開啟：-p conf_r_scale:=0.5 -p floor_sigma_xy:=0.2 -p floor_sigma_yaw_deg:=0.5（conf_spread_max 0.8、conf_fitness_max 0.235 為 yaml 值） | **1.779**（rmse_p 1.334, yaw 2.22°） | — | 比關閉的 1.908 好 0.129；修正 >5 cm 的幀 5.9%；NDT 單獨修正效率縱向 0.18、橫向 0.07、濾波器套用仍 0.01／0.00／0.00（增益還是小）；|縱向誤差|>1.5 m 占 9%（7 段）。**單一組設定，未調參** |
-| 10/26 | 同上 | T3 前 2200 幀 | C 開啟，同上，-p max_frames:=2200 | — | — | 修正 >5 cm 的幀 2.6% → 8.7%；final_fitness 中位 0.227 → 0.223；位姿 yaw − 陀螺儀積分每 500 幀末 +1.6／+5.4／+5.8／+5.8／+5.6°（B2200：+1.2／+4.7／+5.0／+6.2／+6.2°），殘餘航向差沒有改善 |
-| 10/26 | worktree diag-final-fitness（工作區未提交，同 12a972b 原始碼＋analyze_diag 的 D 區段） | T1 前 300 幀 | C 掃描：-p max_frames:=300，yaw floor 0.5；conf_r_scale 0.5／0.25／0.1 × floor_sigma_xy 0.2／0.4 | E300：0.2→2.575、0.4→2.152（C 關閉 2.652） | — | **conf_r_scale 在前 300 幀完全無效（三組逐位元相同）**：這 300 幀沒有任何一幀滿足 spread≤0.8 且 fitness≤0.235（spread 中位 1.69、fitness 中位 0.257）；只有 floor 起作用。採用比例／顯著更新幀：關閉 3.9%／11.4%、0.2 m 4.4%／13.7%（間隔最大 150 幀）、0.4 m 10.7%／25.8%（最大 35 幀） |
-| 10/26 | 同上 | T1 前 300 幀 | floor_sigma_xy 0.6／0.8／1.0，yaw floor 0.5，conf 關閉 | E300：2.033／2.050／2.033 | — | 採用比例 21.9%／34.2%／42.9%、顯著更新幀 33%／44%／49%：**採用比例單調上升，但 E300 在 0.6 之後持平**（更新頻率已修好，再增加只是多採用雜訊） |
-| 10/26 | 同上 | T1 全長 | floor_sigma_xy 0.6／1.0，yaw floor 0.5，conf 關閉 | **1.733**（rmse_p 1.274）／1.828（rmse_p 1.367） | — | 對照：關閉 1.908、(0.2 m＋conf 0.5) 1.779；0.6 m 最佳，1.0 m 變差（|縱向|>1.5 m 的段 10 → 21 段）。**前 300 幀 E 只部分預測全長**：0.6 與 1.0 在 300 幀並列（2.033），全長差 0.095；採用比例本身不是品質指標，要和 E300 並看 |
-| 10/26 | 同上（工作區未提交） | T3 前 300 幀 | floor_sigma_xy 0.6、yaw floor 0.5、conf 關閉，-p max_frames:=300（基準＝B2200 前 300 幀） | — | — | 採用比例 6.2% → 28.8%；顯著更新幀 61.9% → 91.0%，間隔最大 25 → 4 幀；|NDT 量測−預測| 中位 0.600 → 0.203 m；final_fitness 中位 0.249 → 0.245；位姿 yaw − 陀螺儀積分第 299 幀 −0.0° → +1.0°（兩者全程 ±2.4° 內，無明顯差異）；濾波器自認 σ 縱向／橫向 0.27／0.11 → 0.57／0.39 m。Track3 無 GNSS，準確度無法直接判定，需看 Kaggle |
-| 10/26 | 本次 commit（yaml 啟用 floor_sigma_xy 0.6／floor_sigma_yaw_deg 0.5，conf 關閉；結果由同份原始碼與 yaml 在 commit 前產生） | T3 全長 | track3 yaml，無 -p 覆寫 | — | **1.93**（A＋E 為 2.01，A 之前 2.46；助教 baseline 1.29） | 3142 幀；|NDT 量測−預測| 中位 0.092 m（max 5.26 m，未查）；修正 >5 cm 的幀 24.5%；採用比例 25.1%、顯著更新間隔最大 41 幀；final_fitness 中位 0.230，最後兩段（約第 2500 幀以後）0.284／0.291 偏高（無對照，可能是左轉後的路段）；位姿 yaw − 陀螺儀積分每 500 幀末 +1.8／+5.2／+5.3／+5.4／+6.5／+2.4／+2.2°，左轉後回到 +1.6～+2.0°。第一次全長 run 在第 53 幀無聲中斷（原因未明，已用 FORCE 重跑），不是結果 |
-| 10/26 | 分析（Track3_F6full，無新 run） | T3 全長 | 查「+5° 航向殘餘」來源：把位姿 yaw 變化拆成陀螺儀積分／NDT 修正／零偏估計，並對照 IMU 內建姿態的絕對航向（非陀螺儀積分） | — | — | **殘餘的主要來源是初始航向仍偏低約 8°，之後被慢慢拉高**：位姿 yaw − IMU 姿態 yaw（絕對，非相對）第 0／100／300／600／800／1000／1100 幀為 −5.1／−5.5／−2.6／−2.0／−0.2／+2.6／+2.7°，第 1100 幀之後到第 3100 幀（含 90° 左轉）穩定在 +2.4～+3.8°。若 map 與 IMU 姿態座標的固定偏差約 +3°，則第 0 幀位姿航向偏低約 8°（A 之前約 24.5°）、約第 1000 幀才收斂。第 800–1000 幀 yaw 差增加 +2.6°：NDT 修正 +2.04°（77%）、零偏估計與靜止真值差 +0.6°；第 1–1100 幀合計 NDT 修正 +3.25°、零偏估計差 +1.82°（估計零偏動態中 −0.005～−0.006，靜止真值 −0.0041）。NDT 量測 yaw 與最終位姿平均只差 0.0～0.6°，表示 NDT 在直行段對 yaw 幾乎沒有拉力，航向被陀螺儀＋初值決定。**限制：** 沒有 GT，固定偏差 +3° 是假設，IMU 姿態本身也可能漂移；結論是間接證據 |
-| 10/26 | 工作區未提交（init_search_dump 診斷） | T3 第 0 幀 | -p max_frames:=1 -p init_search_dump:=true（234 個起點，輸出 Track3_D0.txt.initsearch.csv） | — | — | **probability 對收斂後 yaw 是一條寬平台，不是尖峰**：156°～169° 的最大 probability 都在 8.0～8.5（最高 8.502 在 162.1°），低側 152° 7.85、148° 6.95 緩降，高側 170° 起陡降（170～172° 6.0、174° 4.0）；fitness 最低值（越低越好）在 164～170° 最佳（0.232～0.237），162° 為 0.239～0.243。所選 162.1° 與 168～170° 的 probability 只差約 5%。假設的真值（約 170°）在平台的高側邊緣、fitness 最佳處。**結論：frame 0 以 argmax probability 選 yaw 在平台內不可靠（直行路段 yaw 約束弱）；僅憑此無法證明真值，只是與航向殘餘分析一致** |
-| 10/26 | 工作區（同 fb16976） | T1 第 0 幀 | -p max_frames:=1 -p init_search_dump:=true，用 GNSS 航向（133.1°）比較第 0 幀選取準則 | — | — | 現行 argmax probability 選 135.1°（誤差 +2.0°）、min fitness 136.7°（+3.5°）、平台（probability ≥95% 最大）加權中心 136.8°（+3.7°）：**三種準則差 <2°，Track1 無法分出優劣**。Track1 的 probability 平台更寬（約 110°～167° 都 ≥ 80% 最大值，變化僅約 5%），fitness 對 yaw 的變化較明顯（0.224～0.267，最低在 130～138°，GNSS 133° 在其中）。**限制：Track1 的 init_guess 本來就準（差約 2°），搜尋是從 init 附近開始，此資料點無法驗證「準則能修正大的初始航向誤差」；單一資料點** |
-| 10/26 | 工作區（同 fb16976） | T2 第 0 幀 | -p max_frames:=1 -p init_search_dump:=true，track2 yaml（ply_scale 8.0），GNSS 航向 −15.2°（`data/Track2/ref/gnss.csv` 已存在，475 筆，涵蓋整個 PLY 時段） | — | — | 現行 argmax probability 選 +10.0°（**誤差 +25.2°**，位於搜尋視窗邊緣）、min fitness −6.6°（+8.6°）、平台加權中心 −18.8°（−3.6°，但視窗以 init/IMU 為中心，平台幾乎等於整個視窗，該值近似視窗中心，不是證據）。probability 在 −80°～+10° 的最大值只在 8.2～9.4 之間（變化約 ±7%），fitness 0.275～0.34；fitness 最低區 −22°～−6°（0.275～0.286）包含 GNSS 的 −15.2°。**兩個 track 的最大航向誤差：probability 準則 2.0°（T1）／25.2°（T2），fitness 準則 3.5°／8.6°；只有兩個資料點，Track2 的景觀近乎平坦，任何準則都不可靠** |
-| 10/26 | 工作區未提交（init_search_criterion 參數；其餘同 e53bc64） | T2 前 600 幀 | track2 yaml（floor 0.6 已啟用，ply_scale 8.0），-p max_frames:=600，init_search_criterion:=probability（CP）／fitness（CF） | CP：**15.83**（rmse_p 10.47, yaw 26.8°）／CF：**10.36**（rmse_p 8.15, yaw 11.0°）（Track2 GNSS 參考） | — | 初始 yaw：CP +10.0°（GNSS −15.2°）、CF −6.6°。fitness 準則較好但兩者都遠差於 Track1（E 1.7）：幀 400–599 位移 CP 28.4 m／CF 38.1 m，GNSS 43.8 m（**距離低估 35%／13%**，ply_scale 或速度偏低）；位移方向 CP −2°／CF −12°，GNSS −18°；GNSS 顯示前 200 幀車靜止（0.3 m），位姿卻動了 3.8 m（CP）／1.8 m（CF）（靜止段幽靈位移，原因未查）。**Track2 仍需 F（ply_scale）與起步靜止段的檢查** |
-| 10/26 | 63db057 | T3 前 1300 幀 | track3 yaml（floor 0.6），-p max_frames:=1300 -p init_search_criterion:=fitness（CF1300），對照 F6full 前 1300 幀（probability） | — | — | fitness 準則第 0 幀選 167.0°（probability 為 162.1°；IMU 姿態 167.2°）。**但兩條軌跡約 60 幀後就重合**：位姿 yaw 差第 0／10／30／60／100 幀為 +3.59／+1.06／+1.05／+0.11／−0.02°，第 157 幀起（public 範圍起點）最大 0.19°、位置最大差 0.32 m（rms 0.05 m）；位姿−IMU 姿態絕對偏差第 100 幀以後逐幀相同（−5.5／−2.6／−2.1／−0.2／+2.5…），final_fitness 中位 0.222 vs 0.223。**fitness 準則對 Track3 沒有可測的幫助，預期 Kaggle public 幾乎不變** |
-| 10/26 | 更正（無新 run） | T3 | 修正先前「+5° 航向殘餘主要是初始航向偏低約 8°」的結論 | — | — | 從 162° 與 167° 兩個不同初值出發，位姿 yaw 在前 100 幀都被 NDT 拉到同一個值（約 158°，相對 IMU 姿態 −5.5°），之後才在第 100～1000 幀緩慢上升到 +2.6°。所以殘餘**不是由第 0 幀搜尋結果決定的**。仍可能的解釋（未驗證）：IMU 姿態航向在開機後數十秒內自己收斂（前 100 幀 IMU 姿態 yaw −3.9°、陀螺儀積分只 −2.7°），或前段 NDT 航向受直行幾何影響偏低。「map 與 IMU 固定偏差約 +3°」的假設只在第 1000 幀之後被支持（含 90° 轉彎仍穩定） |
-| 10/26 | 分析（無新 run；ZUPT 時期結果取自 git 257c97c 的 Track3_result.txt） | T3 靜止段 1000–2199 幀 | 以同一套量法比較三版：ZUPT 時期（A 之前）／AE（A＋E，無 floor）／F6full（floor 0.6） | — | — | **淨位移／路徑長／yaw 淨轉動／yaw 標準差：ZUPT 時期 1.63 m／3.89 m／2.43°／0.55°；AE 1.80 m／4.04 m／1.25°／0.48°；F6full 3.23 m／22.55 m／0.36°／0.05°**。ZUPT 時期的 1.6 m 與 ZUPT 實驗表的「累積位移 1.5 m」相符。結論：A＋E 沒有讓靜止漂移退步；**floor 0.6 把靜止段位置抖動放大 5.8 倍（路徑長 3.9→22.6 m）、淨位移 1.8→3.2 m（退步）**，同時 yaw 抖動壓到 0.05°。之前只看淨位移（2.3→3.3 m）低估了抖動。轉彎後 NDT fitness（2500–2800 幀）ZUPT 時期 0.214／0.212／0.261、AE 0.238／0.243／0.317、F6full 0.253／0.248／0.305；轉彎中（2400–2500）0.297／0.294／0.348 |
-| 10/26 | 工作區未提交（zupt_hold＋K 的 yaw 列歸零＋analyze_diag E 區段） | T3 全長 H1／H2、T1 全長 H1 | track yaml（floor 0.6，zupt_hold true），無 -p 覆寫；H1＝zupt_hold，H2＝再加靜止時 K 的 yaw 列歸零 | T1 H1：E 1.7328，與 F6 逐位元相同（Track1 沒有 ZUPT 靜止幀）；H2 未重跑 T1（改動只在靜止時作用） | — | **靜止段 948–2178 幀（路徑長／淨位移／yaw 淨轉動／roll,pitch 標準差）：ZUPT 時期 4.08 m／1.29 m／2.92°／0.17,0.21°；F6full 22.85 m／2.38 m／0.49°／0.21,0.22°；H1 2.85 m／1.75 m／**5.32°**／0.02,0.03°；H2 3.12 m／1.81 m／0.19°／0.006,0.010°**。H1 的 yaw 5.3° 是因為 E 原本只把 yaw 創新設 0，K 的 yaw 列未歸零，位置創新（第 1500～2100 幀 NDT 的位置量測因場景變化而移動）透過 yaw–位置交叉協方差把 yaw 拉走；H2 修正。陀螺儀積分預測的靜止段 yaw 漂移 ≤0.04°，不是原因。**H2 之後仍有的現象：** 第 1700 幀起 final_fitness 0.21→0.29（位姿沒動，場景的 NDT 對齊變差；F6full 因位姿跟著 NDT 移動 1.6 m 而 fitness 0.227）；起步時（第 2178 幀）位姿因釋放鎖定而跳 1.6 m（y −0.14→−1.77），哪一個位置才對沒有真值無法判定 |
-| 10/26 | 7717f21（git_dirty: no，manifest 記錄） | T1 全長 | track1 yaml（floor 0.6、zupt_hold、A），無 -p 覆寫 | **1.7328**（rmse_p 1.2743, yaw 2.29°） | 待提交（舊版 1.56） | 與 H1／F6 逐位元相同；已設為正式 `Track1_result.txt`／`result_1.csv`（3011 行）。新增 tools：decompose_yaw.py、pose_vs_imu_attitude.py、eval_init_search.py |
-| 10/26 | 分析（matcher_bench guess 模式，無 run 檔留存） | T3 靜止段單幀 | 位姿固定在 H2 第 1500 幀（車沒動），對第 950／1000／1200／1400／1500／1550／1600／1700／1900／2100 幀各掃 ply_scale 7.0–9.5（NDT 單起點對齊後比 fitness） | — | — | **點雲尺度在停車期間會變**：最佳尺度第 950～1550 幀 ≤7.0（在掃描下緣）、第 1600～1700 幀 8.5、第 1900～2100 幀 9.0（拋物線內插 8.27／8.70／8.91）；在最佳尺度 fitness 0.210～0.214，用 7.5 時第 1700／1900 幀 0.258／0.270。原始 PLY 的左側距離中位數第 1500→1600 幀 0.767→0.669（−13%）、第 2000 幀 0.635（−17%），水平距離中位數 950→1200 幀 −11%。H2 在第 1600 幀後 NDT 量測偏移 −0.6／−1.07 m（地圖 −y＝車輛左側）與牆變近 0.7～1.0 m 吻合。限制：單幀、粗網格（0.5）、早期幀最佳尺度在掃描範圍下緣、matcher_bench 沒套 input_max_range |
-| 10/26 | 工作區未提交（ScaleEstimator，預設關閉） | T1 前 300 幀（關閉）／T1 全長／T3 全長 | 線上尺度估計：每 3 幀以目前尺度為中心取 5 個等比候選（×1.08），單起點 NDT 對齊比 fitness，拋物線內插＋平滑 0.3，限制 0.75～1.35 倍，-p scale_estimation_enabled:=true | T1 全長 **2.238**（rmse_p 1.827；關閉為 1.7328）；T1 關閉時前 300 行與已提交結果逐位元相同 | — | **失敗，退步**。T1：估計尺度 7.29～11.47（標稱 8.5，碰到上限 11.47），縱向 rms 約 1.0→1.65 m，但 final_fitness 中位數 0.241→0.221（fitness 變好、GNSS 誤差變差）。T3：尺度在第 948 幀 8.04、第 1200～1550 幀 7.18～7.5、第 1650 幀起掉到下限 5.62（0.75×7.5），與固定位姿掃描的方向（應升到 8.5～9.0）相反；final_fitness 每 500 幀中位數 0.226／0.218／0.241／**0.525**／0.253／0.267／0.288；靜止段路徑長 4.68 m、淨位移 2.11 m、yaw 淨轉動 1.48°（H2 為 3.12 m／1.81 m／0.19°）。**結論：用「單起點 NDT 對齊後的 fitness」在線上選尺度，會讓尺度與平移耦合（尺度吸收錯位），fitness 變好但位置變差；閉迴路還會回饋不穩。** 可能的改良（未做）：只在 ZUPT 靜止時估計並同時要求對齊後位姿位移要小（固定位姿掃描中，正確尺度的位移 <0.2 m、錯誤尺度 1～3 m）；比較候選時固定點數／距離範圍以免 fitness 受點數偏差 |
-| 10/26 | 分析（5597dfe 舊版 vs 047f72a 新版 Track1 結果，無新 run） | T1 全長 | 比較軌跡平滑度與對 GNSS 的階段性誤差：舊版（Kaggle 1.56，本地 E 1.79，floor 關）／新版（floor 0.6，本地 E 1.7328） | 舊 1.79／新 1.7328 | **1.56 → 1.62（退步）** | **本地 GNSS 的 E 與 Kaggle 方向相反。** 每幀加速度（位置二階差）中位／p90：0.0128／0.0339 → 0.0372／0.0984 m（約 2.9 倍）；步長去除 11 幀移動平均後的殘差 std 0.0141 → 0.0345；yaw 步長 std 0.033° → 0.053°；對 GNSS 的 \|縱向\|>1.5 m 的段數 4 → 8（占比 10% → 9%）、單幀縱向變化 >0.3 m 的幀 3 → 7 個。兩版位置差 rms 0.95 m、最大 3.40 m（起點 2.19 m、第 2700 幀 1.92 m）。人工檢視（新版）：逐幀匹配 OK、仍有階段式誤差累積再突然收斂、軌跡/localization_path 不平滑。**推論：floor 0.6 提高增益，把每幀 NDT 雜訊灌進位姿；GNSS（4 Hz、約 0.5 m 偏移、雜訊 ~0.7 m）無法分辨這種高頻抖動，用 GNSS 的 E 差 0.17 選 floor 是不可靠的判準。** 先前只在靜止段加了鎖定，行駛段的抖動沒處理 |
-| 10/26 | 工作區未提交（自適應 floor＋analyze_diag F 區段；預設關閉時前 300 幀與已提交結果逐位元相同） | T1 全長 | 同一份程式、track1 yaml，只改 floor：N0＝floor 0／0；AD1＝-p floor_adaptive:=true（z 2→4）；AD2＝floor_adaptive、-p floor_z_low:=3 -p floor_z_high:=6；對照已提交的 floor 0.6（Kaggle 1.62）與 5597dfe 舊版（Kaggle 1.56） | N0 1.9083／AD1 1.7818／AD2 1.7769／floor0.6 1.7328／舊版 1.79 | 舊版 1.56／floor0.6 1.62 | **平滑度（加速度中位／p90、步長殘差 std、yaw 步 std）：舊版 0.0128／0.0339、0.0141、0.033°；N0 0.0130／0.0345、0.0145、0.033°；AD2 0.0208／0.0652、0.0277、0.049°；AD1 0.0265／0.0818、0.0295、0.052°；floor0.6 0.0374／0.0984、0.0345、0.053°。** 自適應 floor 把抖動降 29～44%，仍比 floor 關閉高 60～100%；floor 在 AD1／AD2 開著的幀占 57%／39%（啟用程度 >0.5），|縱向|>1.5 m 的段數 N0 6、AD1 9、AD2 7、floor0.6 10。floor 啟用比例偏高，推測原因：NDT 創新有自相關（去相關時間 11～20 幀），用白雜訊假設的顯著性會高估 |平均|。**新發現（未驗證因果）：A（初始位姿搜尋）把 Track1 起點位置移了約 (+1.8, +1.2) m：第 0 幀對 GNSS 的縱/橫向誤差舊版 (−0.7,+0.8)、新版 (+1.1,+2.0)；前 150／150～300 幀位置誤差 rms 舊版 1.24／1.66、N0 1.95／2.35、AD2 1.89／1.96、floor0.6 1.66／1.51；300～600 幀 0.53／1.12／0.62／0.60；1500 幀後 1.51／1.53／1.37／1.37。** 搜尋的 xy 偏移格（0／±2 m）在縱向退化方向可能選到偏的起點，與 Track1 本地 E 舊版 1.79 對 N0 1.9083 的差距方向一致 |
-| 10/26 | 4b10876（floor 全關後；run 由 worktree 隔離容器產生，無 `-p` 以外覆寫） | T1 前 300 幀 | P0-5：zx1＝預設 `init_search_xy_offsets` 0／±2 m；zx0＝`-p init_search_xy_offsets:=[0.0]`（只搜 yaw），皆 `-p max_frames:=300` | 對 GNSS 前 300 幀 rms：舊版（Kaggle 1.56）1.47、zx1 **2.16**、zx0 **1.49**（0–150 幀 1.24 對 1.95／1.24；150–300 幀 1.66／2.35／1.71） | — | **起點偏移的原因確認：只差 xy 偏移格，其餘程式與參數完全相同。** 起點誤差（縱向,橫向）舊版 (−0.7,+0.8)、zx1 (+1.1,+2.0)、zx0 (−0.7,+1.0)；第 0 幀兩者位置差 2.06 m、yaw 差 0.6°。Track3 的 A 選出的 xy 與 init_guess 只差 0.25 m（無 GNSS，只能這樣判斷），不受影響。**尚未改 Track1 yaml**（待使用者決定是否採用 `[0.0]`） |
-| 10/26 | 4b10876 | T3 全長 | zb0＝基準（floor 0、`zupt_hold` 開、無 yaw 假設庫，純 yaml）；對照 H2（f81f508，floor 0.6，Kaggle 1.93）與 AE（6e289ca，無 hold／無 floor，Kaggle 2.01） | — | zb0 待提交 | 平滑度（加速度中位／p90、步長殘差、yaw 二階差 p90）：AE 0.0079／0.0233、0.0117、0.045°；**zb0 0.0089／0.0299、0.0157、0.055°**；H2 0.0369／0.0994、0.0342、0.061°。靜止段 948–2179 幀（路徑長／淨位移／最大偏離）：H2 3.12／1.81／1.81 m；**zb0 1.99／0.64／0.79 m**（本批最佳）；yaw 淨轉動 zb0 2.06°（H2 0.19°，第 2100～2199 幀起步前後 pose−IMU 絕對偏差 +2.6→+5.9°）。final_fitness 每 500 幀 0.235／0.229／0.213／0.279／0.241／0.294／0.286。位姿−陀螺儀積分每 500 幀末 +1.2／+4.9／+5.0／+5.1／+9.2／+0.2／−0.3°：**+5° 殘餘仍在** |
-| 10/26 | 4b10876 | T3 全長 | P2-11：zb1＝zb0＋Track2 的 yaw 假設庫（`-p yaw_bank_enabled:=true`、偏移 −10°～30° 每 5°、`yaw_bank_start_speed:=1.0`、`yaw_bank_frames:=150`、`yaw_bank_score:=fitness`） | — | — | **負面結果**：第 6 幀起步、150 幀後承諾偏移 +0.0°（即 A 給的 162.1°）；各假設 150 幀平均 fitness −10°～+10° 只在 0.2486～0.2541（差 2%）、+20°～+30° 0.2644／0.2613／0.2922：Track3 起步段直行 9 m/s，yaw 沒有鑑別力。**不支持「真值約 +8° (≈170°)」的假說**（+10° 比 0° 差 2%）。承諾 0° 的軌跡仍與 zb0 不同（位置差 max 5.20 m 在第 2866 幀、rms 0.87 m；共用的子地圖／matcher target 被各假設的位姿輪流更新，造成非逐位元的差異）；平滑度：步長殘差 0.0394（zb0 0.0157）、yaw 逐幀變化 std 0.267°（0.159°）——假設庫階段輸出在各假設間切換造成粗糙。final_fitness 第 2500 幀後 0.283／0.276（zb0 0.294／0.286）略好、位姿−IMU 姿態終點偏差 +1.06°（zb0 −0.08°）較差。無法判斷 zb1 比 zb0 好 |
-| 10/26 | 分析（matcher_bench guess 模式，無 run 檔留存；起點＝zb0 位姿每 50 幀、63 幀、ply_scale 6.5–10 共 8 個，NDT 單起點對齊後比 fitness） | T3 全程尺度剖面（P1 2a） | 位姿取自 `Track3_zb0`（floor 0），bench 沒套 `input_max_range 30` | — | — | **行駛段（100–800 幀）最佳尺度穩定在標稱 7.5**（14 個取樣幀中位 7.41，視窗 7.45～7.62；fit@7.5 0.226、fit@best 0.220），沒有漂移。**停車段（950–2150）只有一次階躍：加「對齊後位移 <0.5 m」約束後，950–1550 幀 7.44（std 0.22）、1650–2150 幀 9.00（std 0.47）；無約束時 950–1550 看起來是 7.0（std 0.31）是假象——尺度偏小的解把位姿拉走 1～1.9 m（尺度與平移耦合）。** 階躍發生在第 1550～1650 幀（+20%），第 2200 幀起步後最佳尺度回到約 7.0～7.5（尺度只在停車的無視差期間偏離）。起點 0–150 幀最佳尺度偏小（≤7.0，伴隨 2.7 m 位移，可信度低）。轉彎段與轉彎後（2400–3142）最佳尺度散在 6.5～9.0、fit 0.23～0.29，與尺度無關。**zb0 在第 2178 幀起步沒有跳動**（位移 (−0.09,−0.03) m；H2 (−0.44,−1.63) m）：先前的起步跳動由 floor 造成，floor 關閉後消失。**轉彎段 NDT 找到的最佳對齊離輸出位姿很遠：第 2600／2650 幀 5.66／6.37 m（2650 幀 fit 0.270→0.214），第 2800／2850 幀 2.88／2.14 m 但 fit 沒變（縱向退化方向漫遊）→ 轉彎中輸出位姿可能已偏數公尺**。結論：G（停車期間估計尺度）的位移約束有效，但停車期間的尺度偏離只在無視差時出現且起步後回到標稱，若帶進行駛段會出錯；zb0 的 hold 已讓停車期間不受影響，G 的預期收益小。P1 的主要缺口是轉彎與轉彎後，不是尺度 |
-| 10/25 | 工作區（已移除） | T1 全長 | 累積多幀局部點雲：NDT source ＝ 當前幀＋最近 4／10 個關鍵幀（間距 1 m），其餘同 f_new | 1.94（rmse_p 1.50）／**487（發散）** | — | 負面結果；關閉時前 100 幀與 master 逐位元相同；每幀耗時 ×1.6／×3.3 |
-
-**舊版 Track1 全長 run 評估（10/25，2481 幀）**
-- 分段：0–300 幀 rmse_p 2.5–3.0 m（yaw 6–7°，起步低速段）；300–1600 幀 0.8–1.7 m（縱/橫誤差 std 各約 0.9 m，平均偏差 lon +0.45 / lat +0.19 m）；1650–1850 幀 yaw 誤差先升到 9–15°、橫向 2–4 m；1875 幀起縱向線性發散（約 −0.4 m/frame），2400 幀誤差 ≈ 220 m。
-- 發散機制：估計速度在 1875 後掉到 1–2 m/s，GT 仍約 12 m/s。原因鏈：①yaw 先漂（旋轉修正限幅 1.5°/幀，追不回 10°+）→ ②NDT 結果被 `divergence_*` 整幀拒絕並 coast → ③速度 EMA 只在「被採納」的幀更新，且量的是被 `max_long_correction=0.5` 截斷後的位移 → 速度被往下拉、永遠回不來 → ④縱向誤差線性累積。限幅/coast 是造成不可恢復的設計缺陷，不是調參問題。
-- 估計速度本身也很吵（v_est 與 GT 差 ±2–4 m/s，例如 900 幀 7.4 vs 10.1），等速模型品質不足；IMU 尚未使用。
-- 結論：舊版不可救（與 §3 判定一致），全部移除限幅/coast/速度 EMA/前進軸自學習。
-
-**縱向累積延遲（「誤差累積到 ~1.5 m 才被拉回」）診斷（10/25，Track1 全長，GNSS 僅作本地參考；其 ~0.5 m 安裝偏移使絕對值只能比相對）**
-- 診斷方法：`diag.csv` 逐幀記錄 預測／NDT 量測／濾波後位姿與 σ，離線對 GNSS 比較三者誤差、修正效率（修正量對所需修正的迴歸斜率）、|縱向|>1.5 m 連續段長度。
-- 改動前（最大距離 30）：最終位姿≈預測，修正效率縱向／橫向／yaw 皆 ≈0.01；NDT 量測誤差不比預測小（lon 1.58 vs 1.28 m）；NDT 修正量扣訊號後殘餘雜訊 lon 1.1 m／lat 0.5 m／yaw 1.9°（大於 R），馬氏距離重尾（11% 幀超過閘門）。→ 量測是雜訊而非被壓縮的訊號；調高增益只會灌入雜訊。推測原因：多起點只取 probability 最大者，會在模式間翻轉。
-- 改動：候選軟加權（(p/pmax)^4 × 以預測為中心的先驗）取代 argmax；量測 R＝基準 R＋候選分散度協方差（逐幀）；EKF 加前向加速度零偏 b_a。
-- 結果（f_new vs 改動前）：殘餘雜訊 lon 1.18→0.41 m、lat 0.50→0.30 m、yaw 1.85→1.17°；超過閘門 11%→0%；縱向 rms 1.27→0.98 m；|縱向|>1.5 m 的幀 20%→11%、段數 12→5；E 1.99→1.79。
-- **未解決**：|縱向|>1.5 m 的段持續時間中位 42／最長 180 幀（未改變），修正效率仍 ≈0.01。診斷：①濾波器過度自信（自認 σ_lon 0.27 m、σ_lat 0.09 m，實際 ~1 m）→ 幾乎不採用 NDT；②縱向似然近乎平坦（候選縱向分散中位 1.13 m、有效候選 4.2/5），NDT 單幀只能把誤差往真值拉 19%——影像點雲在縱向本質上可觀測性差，融合方式無法補救。b_a 幾乎沒動（−0.08~0.05），貢獻未做消融，不確定。
-- 下一步候選：①讓 P 與實際誤差一致（過程雜訊／量測相關性），因量測雜訊已降，調大增益現在才可能有效（先前在雜訊 1.1 m 時調大是變差）；②提高縱向可觀測性（累積多幀局部點雲、顏色—強度的車道線特徵）；③處理 resolution 2 發散。
-
-**濾波器一致性（讓 σ 與實際誤差一致）嘗試（10/25，負面結果）**
-- 診斷：f_new 的 σ_lon 0.27 m／σ_lat 0.09 m，實際誤差 0.98／0.77 m（NEES 3.6×／8.3×）；NIS 中位 0.32、平均 0.69（χ²₃ 期望 2.37／3.0）→ S 被高估（R 太大）而 P 被低估（Q 太小）。預測誤差增量高度自相關（lag-1：lon 0.82／lat 0.94／yaw 0.90），隨機游走擴散約 0.32 m/√s，約為原過程雜訊的 3 倍；NDT 創新實測 std lon 0.45 m／lat 0.33 m／yaw 1.19°，小於原設定 R。
-- 試驗（A/B/C，見上表）：只降 R 會更糟（σ 更小→更自信→失控）；加大 Q 能讓 NEES 靠近（橫向 8.3→4.9）並縮短 >1.5 m 段的持續時間（中位 42→17–19 幀），但段數增加、縱向 rms 與 E 變差，修正效率仍 ≈0.01，NDT 單獨能給的修正量反而更低（lon 0.19→0.06）。
-- 結論：在目前量測結構下，調 Q／R 無法同時讓 σ 誠實又讓精度變好。原因是 NDT 量測誤差在時間上相關且貼著預測（黏性），沒有足夠的獨立資訊——要誠實就得更不信任它，要修正快就得多信它，兩者互相抵消。**維持 f_new 預設（E 1.79）。** 保留診斷檔的 sigma_yaw 欄位與 `StateEstimator::Sigma`。
-- 因此要縮短累積延遲只能增加量測的獨立資訊（縱向可觀測性）：累積多幀局部點雲、顏色—強度的車道線特徵等。
-
-**累積多幀局部點雲（10/25，負面結果，實作與開關已移除、未 commit）**
-- 動機：單幀影像點雲沿行進方向的約束弱、NDT 似然近乎平坦；想靠多幀累積加寬幾何基線，提高縱向可觀測性。
-- 做法：每移動 ≥1 m 存一個關鍵幀（點雲＋濾波後位姿，只用過去幀，causal）；NDT 的 source ＝ 當前幀＋最近 K 個關鍵幀（以各自位姿放進地圖座標，再用當前幀預測位姿的逆轉回車體座標），合併後體素降採樣。K=0 時與原本逐位元相同（前 100 幀與 master 已提交結果比對，差異 0）。
-- 結果（Track1 全長，GNSS 僅作本地參考）：
-
-| | E | rmse_p | 縱向 rms | >1.5 m 的幀比例／段數 | 每幀耗時 | source 點數中位 |
-|---|---|---|---|---|---|---|
-| 基準 f_new（K=0） | **1.79** | **1.34** | **0.98 m** | **11%／5** | 252 ms | ~2000 |
-| K=4 | 1.94 | 1.50 | 1.15 m | 18%／9 | 397 ms | 5061 |
-| K=10 | 487（發散） | 484 | — | — | 829 ms | 12937 |
-
-- K=4 的機制指標沒有改善：NDT 單獨能給的縱向修正效率 0.19→0.22、與所需修正的相關 0.40→0.49，量測殘餘雜訊 lon 0.41→0.45 m／lat 0.30→0.30 m／yaw 1.17°→1.08°，>1.5 m 累積段的持續時間中位 42→37 幀、最長 180→181 幀，實質沒變；縱向 rms 反而變差。
-- K=10 發散：第 180 幀誤差 >3 m、第 388 幀 >10 m，之後線性增加到約 900 m；發散點附近估計速度掉到約 2.2 m/s（實際 5–10 m/s）、NIS 為 0——又是 NDT 貼著預測、不再提供修正、速度被拖低的鎖死。
-- 判斷（依據上述數據與先前診斷，非單一實驗的證明）：縱向瓶頸是量測誤差在時間上相關且貼著預測，不是單幀點數不足；累積多幀只是把同一組有偏差的點雲疊在一起，沒有增加獨立的縱向資訊（與先前「10 幀移動平均只把 NDT 量測誤差從 1.62 降到 1.47 m」一致）。過去幀用的是已濾波的位姿（本身有 ~1 m 誤差），這些誤差被當成地圖幾何一起送進 NDT，反而放大偏差。代價是計算量 ×1.6–3.3。
-- 限制：只測了 K=4、10，關鍵幀間距固定 1 m，只在 Track1 驗證，沒有掃參數也沒有在 Track3 試；但機制指標沒有任何跡象顯示會有顯著改善，因此不再投入。
-- 結論：不採用，程式與 `accumulate_*` 參數都已移除。可重現的描述見上；若日後要重做，只需在 NDT source 前併入過去關鍵幀即可。縱向可觀測性的其他方向（影像顏色對應地圖強度的車道線特徵）尚未驗證可行性。
-
-**Track3 診斷與尺度（10/25，Track3 沒有 GNSS，只能用自洽度）**
-- Track3 Kaggle public 3.98（助教 baseline 1.29，用 ply_scale 8.5）。檢驗過的推測：①初始位姿誤差大導致收斂慢——不成立（init_guess 與第 0 幀 NDT 結果只差 3.1 m／3.3°；init_guess 的 roll／pitch 14.2°／14.9° 在第 0 幀就被修成 1.1°／2.2°）；②初速 0 追不上（車一開始就約 10 m/s）——不成立（估計速度 1–2 幀內到 ~10 m/s，前 60 幀縱向落後 ≈0 m）；③後半段跟丟（估計速度 ≈0.2 m/s）——不成立（IMU 顯示第 1100–1950 幀完全靜止，加速度雜訊 0.01–0.02，80–100 s 有 ~80° 轉彎，結尾又停下）。
-- Track3 的 public 只評前 5–40%（約第 157–1257 幀），含 ~40 s 靜止段，固定偏差會被重複計分。
-- 無 GNSS 的判準：IMU 靜止窗口得到的真實陀螺儀零偏 −0.0041 rad/s（Track1 也是 −0.004，同一顆感測器；靜止前向加速度偏差 ≈0）。濾波器估出的零偏若被拉離這個值，代表 NDT 的 yaw 與陀螺儀矛盾（尺度不對）。此判準僅作離線診斷，演算法本身不用未來資料。
-- 結論：8.5 對 Track3 不適用（零偏 −0.046、NIS／fitness 最差）；採 **ply_scale 7.5**（fitness 最低、軌跡為五組中位）。Track3 開頭只有 4 個靜止 IMU 樣本，估不了零偏，加零偏先驗（`gyro_bias_prior` −0.004、σ 0.003；Track1 靜止樣本充足，不受影響）。
-- 實作：參數拆成每個 track 一份完整的 yaml（`localization_params_Track1/2/3.yaml`，原通用檔移除），launch 依 `data_path` 目錄名選用，找不到就報錯；三份目前只有 `ply_scale` 不同（Track1/2 為 8.5、Track3 為 7.5；Track2 尚未驗證，暫用 Track1 的值）。`tools/diff_params.py` 檢查三份的差異。驗證：Track3 用 7.5 的前 30 幀與 ply_scale 7.5 的 run 逐位元相同，與 8.5 差 3.6 m。選尺度的依據是自洽度而非 Kaggle 分數（規則 3）。
-- 未解決：所有尺度的零偏估計在第 100 幀後都漂到 ≈ −0.0076（真值 −0.0041），加速度零偏估計 −0.03～−0.04（真值 ≈0）——與尺度無關，表示 NDT 的 yaw／縱向量測或模型仍有固定偏差，原因待查。Track3 完整 run 尚未用 7.5 重跑。
-- **Track3 停等漂移診斷與 ZUPT（10/25，分支 feature/zupt）**：使用者觀察「等紅燈 GT 速度 0 但估計仍累積位移，左轉後特徵錯位無法收斂」。舊版全長 run 數據證實：停等段（約第 900–2200 幀，≈47 s）輸出累積位移 ≈ 6.6 m、yaw 漂移 ≈ +19°；EKF 速度只緩慢衰減（900 幀 0.61、1300 幀 0.20、1600 幀才 0），沒有零速更新；停等時 NDT 以預測為初值、約束弱，量測位移幾乎等於預測位移；零偏被拉到 −0.011（真值 −0.0041），誤差 0.4°/s 與 yaw 漂移吻合；左轉第 2600–2700 幀 meas−pred yaw 達 28°、NIS 244、inflation 21.5，之後 fitness 0.33–0.35（停等前 0.22）。
-  - 實作：`ImuProcessor::IsStationary`（最近 50 個 IMU 樣本，加速度三軸標準差總和 <0.12、陀螺儀三軸標準差總和 <0.009；靜止段實測 <0.09／<0.006，行駛或起步 >0.2／>0.007，可分開；只用已取用樣本，causal）＋`StateEstimator::UpdateStationary`（偽量測 v=0 與零偏=窗口陀螺儀均值）。靜止時預測前先釘速度與零偏，預測改用加速度零偏估計（不積分出假速度），NDT 更新後再釘一次。參數 `zupt_*` 三份 yaml 同步。launch 新增 `max_frames`。
-  - 結果（前 2800 幀，ply_scale 7.5，Track3 無 GNSS，只看自洽度）：1226 幀判為靜止；停等段 900–2200 幀位移 6.6→1.5 m、yaw 漂移 ≈19°→≈3.5°；零偏全程 −0.0035～−0.0041（舊 −0.011）；轉彎時 max NIS 11（舊 244）、inflation 全程 1.0（舊 21.5）、轉完 fitness 0.21–0.26（舊 0.33–0.35）。殘留：停等段仍有 1.5 m 位移（來自 NDT 對靜止點的修正，無 GT 無法判定是修正還是雜訊）。尚未跑全長與 Kaggle。
-- **Track3 全長 run（7.5）診斷（10/25，僅看 diag.csv 與 result.txt，無程式修改）**：使用者觀察「等紅燈 GT 速度 0 但估計仍累積位移，左轉後特徵錯位無法收斂」，數據證實：
-  - 停等段（約第 900–2200 幀，≈47 s）輸出累積位移 ≈ 6.6 m、yaw 漂移 ≈ +19°。EKF 速度只是緩慢衰減（第 900 幀 0.61、1100 幀 0.37、1300 幀 0.20、1600 幀才 0），而 IMU 約 1100 幀起已完全靜止——沒有零速更新（ZUPT）。
-  - 停等時 NDT 量測位移與預測位移幾乎相同（如 900–1000：pred 1.6 m／meas 1.3 m），NDT 初值取預測、停等場景約束弱，只是跟著預測走，沒有把位置拉回。
-  - 陀螺儀零偏估計在停等段被拉到 −0.011（真值 −0.0041），誤差 0.007 rad/s ≈ 0.4°/s，與 yaw 漂移量級吻合（即上方「未解決」項的後果）。
-  - 左轉（第 2200–2750 幀）：以約 −177°→−77° 完成約 100° 轉彎，第 2600–2700 幀 meas_yaw−pred_yaw 達 5°→28°、NIS 14→244、inflation 最高 21.5，之後 fitness 升到 0.33–0.35（停等前 ≈0.22），表示轉彎時起點航向偏差已使 NDT 對應錯位，之後以較差的 fitness 繼續。
-  - 建議修法（causal、不用 GNSS，合規）：IMU 窗口靜止偵測（陀螺儀與前向加速度的窗口方差小於門檻）→ ZUPT：v←0（小 R）、凍結 yaw 與零偏更新、降低/略過 NDT 位置更新；靜止期間順便以陀螺儀均值重估零偏。尚未實作，待使用者確認。
-
-**IMU＋EKF 設計與發現（10/25）**
-- 狀態 `[x, y, yaw, v, b_g, beta]`：beta＝行進方向相對車體 x 軸的偏角（取代舊的 camera_yaw_offset／前進軸自學習）。NDT 當 (x,y,yaw) 量測，縱向 σ 大於橫向；馬氏距離超過門檻只**放大 R**，不丟棄、不截斷修正量。z/roll/pitch 不進濾波器，以固定比例向 NDT 靠攏。
-- IMU 資料：gyro wz 即 yaw rate（5 s 視窗對 GNSS 斜率 0.92），**零偏約 −0.004 rad/s（110 s 累積 ~28°）必須估計**；Track1 第 0 幀前有 165 個靜止樣本可初估，Track3 只有 4 個（改在線估，σ 0.02）。
-- 加速度計：用 IMU 內建 orientation 扣重力後從靜止積分，100 s 內與 GNSS 速度差約 1 m/s；用加速度低通估重力方向或高通濾波都不行。**速度的唯一可靠來源是它**，NDT 的縱向約束弱。
-- 發散根因（NDT 縱向收斂域窄）沒有消除：目前穩定區間很窄（psp 0.6 即發散）。多起點在 r3 有效、在 r2 反而有害，推測 NDT 縱向最佳點有系統性偏後（尺度／形狀失真）。下一步應處理縱向觀測：每幀尺度估計、前處理（去遠處點）、或用先驗加權選起點，而不是只看 probability。
-- 注意：NDT probability 選起點未加先驗是第一版最脆弱的環節（已於 10/25 改為軟加權＋先驗，見上）。
-
-**G-ICP vs NDT 分析（10/25）**
-- NDT 從參考位姿出發誤差小，但幾乎不修正擾動：縱向 ±1 m 仍剩 0.7–0.97 m、橫向 +1 m 仍剩 0.99 m，yaw ±3° 只修回到約 2–2.8°。它的「準」主要來自起點本來就準，收斂域很窄。
-- G-ICP 收斂到一個與起點無關的固定點（收斂域較寬），但相對 GNSS 有一致的縱向 +0.55 m 偏差與 1–1.7° 的 yaw 誤差。純追蹤時每幀跳 2–3 m，非常不穩定。
-- 兩者速度相近（單執行緒約 60 ms/幀）；PCL 1.14 的 GICP 沒有多執行緒。
-- 結論：瓶頸不在配準器選擇。影像點雲在縱向約束弱、形狀有失真，改進重點應放在 (1) 狀態估計（IMU yaw rate＋速度模型）與 (2) 點雲前處理（去除遠處/天空/失真點）；NDT 繼續當核心，resolution 2 略優於 3。
-- 注意：GNSS 參考點與 Kaggle GT 的參考點可能有約 0.5 m 的 lever arm 差異（init_guess 相對 GNSS 為縱向 −0.49、橫向 +0.25 m），本地 E 的絕對值僅供相對比較。
-- PLY body 的 roll 約 −6~−8°、pitch 約 1~6°，是持續存在的姿態，不是 init 的雜訊。
-
-## 8. Kaggle 提交紀錄
-
-| 日期時間 | Track | 對應實驗 | Public | 當日已用 | 備註 |
-|---|---|---|---|---|---|
-| 10/25（時間未記） | Track1 | f_new（commit 5597dfe，本地 E 1.79） | **1.56** | — | 助教 baseline 1.79，已通過（使用者回報） |
-| 10/25（時間未記） | Track3 | ply_scale 8.5、零偏估計 −0.046（舊版，無 ZUPT） | **3.98** | — | 助教 baseline 1.29（使用者回報） |
-| 10/25（時間未記） | Track3 | ply_scale 7.5＋零偏先驗＋ZUPT | **2.46** | — | 尚未通過 baseline 1.29；視覺上 ZUPT 解決速度飄移，仍受初始航向偏差影響（使用者回報） |
-
-### Track2 初始化與發散診斷（2026-10-26，worktree `track2-scale` / branch `worktree-track2-scale`，基於 master 9a2795e＝含 A、E；程式碼無改動，結果未提交）
-
-所有 run：Track2 yaml（A、E 啟用）＋下列 `-p` 覆寫；本地 E 以 `ref/gnss.csv` 為參考（僅評估）。工作區乾淨（除偵錯時暫加、已還原的 `dbg_init_yaw_offset_deg` 與 `DBG` 輸出）。
-
-| 批次 | 覆寫 | 幀數 | 結果（本地 E） |
-|---|---|---|---|
-| ply_scale 7.0／7.5／8.0／8.5／9.0／9.5 | — | 前 900 | 12.4／71／59／45／61／48 |
-| ply_scale 5.0／5.5／6.0／6.5／6.8／7.2 | — | 前 900 | 37.6／73／58／61／70／71 |
-| 7.0 與 8.5 × {`zupt_freeze_yaw:=false`、`init_search_yaw_step_deg:=1`(range 20)、兩者} | — | 前 600 | 7.0：5.7／5.6／5.7；8.5：19.9／10.6／10.8 |
-| 關閉搜尋、強制初始 yaw 偏移 +0／6／10／15／20／25°（7.0；GNSS 真值約對應 +15°） | 暫時除錯參數 | 前 600 | 9.5／5.5／7.1／14.1／9.0／10.3（yaw rmse 11.1／6.4／5.9／**4.1**／9.6／12.5） |
-| 同上＋`init_sigma_beta_deg:=0.01 process_sigma_beta:=1e-6`（釘住 beta） | — | 前 600 | +15°：4.68（yaw 2.0°）；+6°：4.49；搜尋＋7.0：4.42；搜尋＋8.5：21.2 |
-| 釘住 beta、ply_scale 6.5／7.0／7.5／8.0／8.5 | — | 全長 | 625／218／670／653／662（全部發散） |
-| 釘住 beta、7.0，另加 `fusion_prior_sigma_lon:=5`／＋縱向起點 ±6／`process_sigma_accel_bias:=0.05`／`process_sigma_speed:=0.3`／`meas_sigma_lon:=0.6` | — | 全長 | 457／461／282／456／469（全部發散） |
-
-**發現（依因果順序）**
-1. **第 0 幀 NDT probability 對 yaw 幾乎是平的**：558 個起點（yaw −90°～+10°）的最佳 probability 只在 9.1–9.45，fitness 0.27–0.30。argmax 是雜訊——搜尋步長 5°→2° 就從 −21° 換成 −79°（`DBG` 逐起點輸出，已移除）。方案 A 在 Track2 起點（車靜止約 200 幀、場景不變）無法鑑別 yaw；起步後的 yaw 假設才有鑑別力（強制 yaw 實驗中 yaw rmse 在真值附近最低），但**平均 fitness 選不出它**（+15° 的 fitness 反而較差）。
-2. **beta（行進偏角）在起步時爆掉**：未釘住時 beta 在第 290–430 幀從 0° 被推到 +31°（Track1／Track3 全程 ±2°；舊 s70 run 則穩定在 −6°）。釘住 beta 後前 600 幀 p_max 38→11 m、yaw rmse 4.1→2.0°（起點接近真值時），但仍不足以穩定。
-3. **全長發散的機制是縱向速度損失**（與舊版 Track1 同類）：第 ~850 幀起估計速度比實際低 2–3 m/s（約 15–20%），縱向誤差線性增長到 −500 m；NDT 量測位移與預測位移的比值幾乎相同（貼著預測走，修正效率≈0），fitness 仍有 0.2–0.28，無法由 fitness 偵測。速度唯一的來源是加速度積分，誤差量級與重力洩漏（姿態誤差 1° ≈ 0.17 m/s²）吻合。
-4. 尺度：前 900 幀對尺度的反應混亂（無單調趨勢，7.0 只是撐比較久），不能用它選尺度；Track2 的 yaml 仍是 8.0（與 Track1／2 的 8.5 說明不一致，`diff_params.py` 顯示 Track2＝8.0，CLAUDE.md §2 寫 8.5，需對齊）。
-
-**負面結果**：掃尺度、搜尋步長、關閉 yaw 凍結、釘住 beta、放寬融合縱向先驗、加寬縱向多起點、加大加速度零偏／速度過程雜訊、縮小縱向 σ——全長皆發散（E 218–670）。
-
-**下一步（未做）**
-- 縱向速度：需要加速度計以外的速度資訊或更好的重力補償（用起步前靜止窗口估 IMU 姿態誤差／pitch 修正、坡度），並確認 Track2 IMU 姿態品質與 Track1 的差異。
-- 初始化：把 yaw 決定延後到起步後（多假設追蹤前 N 公尺、累積證據再 commit，仍是 causal）；單幀 probability／fitness 不可用。
-- beta：釘住（或加先驗）可作為保險，但要先確認 Track1／Track3 不退步才能放進共用 yaml；目前**未**改任何 yaml。
-
-### Track2 收斂（2026-10-26 續，worktree `track2-scale`，**工作區未提交**，基於 9a2795e）
-
-**結果**：Track2 純 yaml（`localization_params_Track2.yaml`，無 `-p` 覆寫，3294 幀 GNSS 範圍）本地 **E=2.274**（rmse_p 1.36 m、yaw 4.58°、p_max 3.2 m），先前所有設定全長皆發散（E 218–670）。run 標籤 `v1yaml`，與 `u1s87`（8.7 + 等價 `-p`）逐位相同，可重現。
-
-**改動（程式）**
-1. `ImuProcessor::IsStationary` 多回傳窗口前向加速度均值；`StateEstimator::UpdateStationary(yaw_rate, forward_accel_mean)` 對加速度零偏 ba 做偽量測（`zupt_sigma_accel_bias`，0 = 關）。原本靜止時量到的前向加速度被丟掉，ba 從不被觀測。
-2. ZUPT 判定加條件 `|窗口前向加速度均值 − ba| ≤ zupt_accel_mean_max`（0 = 關）。原因：Track2 以穩定 ~0.33 m/s² 起步，窗口標準差很小，被誤判成靜止，真實加速度被當成零偏（ba=0.33）並把速度釘在 0。
-3. 新增 `YawBank`（`include/localization/yaw_bank.h`）＋ `StateEstimator::RotateYaw` ＋ 主迴圈把「預測→NDT→更新」抽成 lambda：車速 > `yaw_bank_start_speed` 才起步，對 `yaw_bank_offsets_deg` 的每個偏移複製一份濾波器一起追蹤，`yaw_bank_frames` 幀後承諾 `yaw_bank_score`（fitness｜nis｜lateral｜yaw）最佳者；輸出為目前最佳者（causal）。各假設逐幀指標寫入 `<result>.bank.csv`。預設關閉。
-4. Track2 yaml：`ply_scale` 8.7、`init_search_enabled` false、`init_sigma_beta_deg` 0.01／`process_sigma_beta` 1e-6（釘住 beta）、`process_sigma_accel_bias` 0.002、銀行開啟（偏移 −10..30° 每 5°、start_speed 1.0、150 幀、fitness）。Track1／Track3 yaml 只多了上面新參數的預設值（行為不變）。
-
-**診斷發現（修正先前假說）**
-- 重力洩漏假說不成立：Track2 靜止窗口前向加速度 −0.003 m/s²、IMU 姿態 up 與重力方向差 0.03°；純 IMU 積分速度整段 3300 幀貼著 GNSS（約 3%）。濾波器速度損失來自 ba 被帶偏（0.1–0.5 m/s²）。
-- `init_guess.txt`（Track2）：位置差 GNSS@frame0 0.64 m（正常）；yaw −30.4° 對 GNSS −15.2°（差 15.2°，Track1 僅 2.0°）；IMU 姿態絕對 yaw −22.7° 也差 7.5°（Track1 0.4°）。
-- 第 0 幀 NDT probability 對 yaw 平坦（−90°～+10° 都在 9.1–9.45）；起步後的幀才有鑑別力。**尺度正確時 fitness 能選到 GNSS 一致的 yaw**（尺度 8.5：每個視窗 50–400 幀都選 +15°，yaw rms 1.3–2.4°）；尺度 7.0 時 fitness／lateral 都選錯——先前「7.0 最好」是錯尺度下的假象。
-
-| 批次（Track2 全長，覆寫皆含 beta 釘住、ba 過程雜訊 0.002、關第 0 幀搜尋、銀行 150 幀） | E |
-|---|---|
-| 無銀行、ba 偽量測、ZUPT 修正前（尺度 7.0） | 593（ba=0.33） |
-| ZUPT 起步修正後（無銀行，7.0）：beta 釘住 ba 0.002 | 9.99（`q1c`） |
-| 銀行 lateral 打分，尺度 6.0／6.5／7.0／7.5／8.0／8.5 | 121／9.9／410／222／399／7.2 |
-| **銀行 fitness 打分，尺度 8.0／8.3／8.5／8.7／9.0** | 41.5／34.6／**2.96／2.27／2.34**（8.0、8.3 發散；8.5–9.0 為穩定帶） |
-| 同上 8.5，`process_sigma_accel_bias` 0.0005 | 2.99（與 0.002 的 2.96 幾乎相同） |
-| 純 yaml（尺度 8.7） | **2.274**（`v1yaml`） |
-
-**回歸**：Track1 前 600 幀 E=2.1427（與改動前逐位相同）；Track1 全長 E=1.908（master 9a2795e 含 A、E 的基準；逐項關閉 `zupt_sigma_accel_bias`／`zupt_accel_mean_max` 後三組統計逐位相同，改動不影響 Track1；STATUS 舊記的 1.79 是更早 commit）。Track3 前 1200 幀與 master 已提交結果最大位置差 0.015 m、yaw 0.01°。
-
-**限制與風險**
-- 尺度帶外（8.0／8.3）仍會發散，Track2 對尺度敏感；8.7 位於穩定帶中央。選尺度與銀行指標用了 Track2 的 GNSS 做本地比較（規則 7 允許；演算法本身不用 GNSS，銀行的打分只用 NDT fitness）。
-- 銀行偏移範圍（−10..30°）是依 Track2 的 init_guess 偏差設的；其他 track 若要啟用需重新評估。銀行階段每幀成本約 9 倍（約 150 幀）。
-- Kaggle 尚未提交 Track2；public 分數需另行記錄。
-
-### 合併 master 後的 Track2 驗證（2026-10-26，分支 `worktree-track2-scale`，merge commit e4259e2 之後）
-
-- Track1 全長、Track3 全長（純 yaml）與 master 已提交的 `Track1_result.txt`／`Track3_result.txt` **逐位元相同**（`cmp`）；Track1 E=1.7328。我新增的 ZUPT 行為（`zupt_sigma_accel_bias`、`zupt_accel_mean_max`）與銀行在 Track1／3 預設關閉。
-- Track2 合併後純 yaml（floor 0.6／0.5°）退步：E=**16.96**（合併前 2.27）。消融（Track2 全長，合併後程式）：只關 hold 16.13；只關 floor（`-p floor_sigma_xy:=0 -p floor_sigma_yaw_deg:=0`）**2.277**；floor 與 hold 都關 2.217；floor_xy 0.2（yaw 0.5°）2.349；floor_xy 0.3（yaw 0）2.622。→ 退步來自 master 的 floor 0.6，不是 `zupt_hold`。
-- 處理：**只改 Track2 yaml**，`floor_sigma_xy`／`floor_sigma_yaw_deg` 設 0；Track1／3 yaml 不動。此 yaml 的數值設定與 `mg2nofloor`（E=2.2773，用 `-p` 覆寫跑的）相同，**未另跑純 yaml 版**（跑到一半被停止），引用結果請用 `mg2nofloor` 並註明覆寫。
-- 未解決／備註：Track2 對 ply_scale 與 floor 敏感（8.0／8.3 發散，floor ≥0.3 變差）；Kaggle 尚未提交 Track2。
-
-### Track2 正式結果檔（2026-10-26）
-- `result/Track2_result.txt`（3299 行）、`result_2.csv`（3299 幀＋標頭）取自 run `Track2_mg2nofloor`：程式為 `e4259e2`（含 7e79fdb 之前的 Track2 設定），Track2 yaml 加 `-p floor_sigma_xy:=0.0 -p floor_sigma_yaw_deg:=0.0`；目前 master 的 Track2 yaml 已把這兩項寫成 0，數值設定相同。本地 E=2.2773（rmse_p 1.363、yaw 4.57°，GNSS 參考，3294 幀）。
-- **尚未用目前 master 的純 yaml 重跑驗證逐位元相同**（之前預期相同，未驗證）；Kaggle 尚未提交。
-- 舊的 `Track2_result.txt`（516 行、10/25）是不完整的舊 run，已被取代。
+**Track1（GNSS 本地 E）**：`5597dfe` 1.79（Kaggle 1.56）｜floor 0 ＋A 搜 xy 格（N0）1.9083｜同上＋xy `[0.0]` 前 300 幀 rms 1.49（舊版 1.47）｜floor 0.6（`047f72a`）1.7328（Kaggle 1.62）｜自適應 floor AD1／AD2 1.7818／1.7769｜ScaleEstimator 開 2.238｜累積點雲 K=4／10 1.94／487。
+**Track3（無 GNSS；平滑度＝位置加速度中位）**：AE 0.0079、H2 0.0369、`zb0` 0.0089；`final_fitness` 每 500 幀中位 `zb0` 0.235／0.229／0.213／0.279／0.241／0.294／0.286（第 1500–2000 與轉彎後偏高）；位姿相對陀螺儀積分每 500 幀末 `zb0` +1.2／+4.9／+5.0／+5.1／+9.2／+0.2／−0.3°。
+**Track2（GNSS 本地 E）**：收斂前全長 218–670；純 yaml（floor 0.6）2.274；併入 floor 0.6 後 16.96（只關 hold 16.13、只關 floor 2.277、兩者都關 2.217、floor_xy 0.2 2.349、0.3 2.622）；floor 0 的 `mg2nofloor` 2.2773（rmse_p 1.363 m、yaw 4.57°）。

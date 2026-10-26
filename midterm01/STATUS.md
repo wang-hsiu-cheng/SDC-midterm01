@@ -160,7 +160,7 @@ IMU ─────────────────────────�
 - [x] Track2 關 floor 後 E=2.27（`mg2nofloor` 2.2773，與併入前 2.274 相同）；使用者先前回報的 2.7 是筆誤。**消融定案：破壞 Track2 的只有 floor**（只關 hold 仍 16.13、只關 floor 回到 2.2773），`zupt_hold` 與 E 的 K 增益歸零對 Track2 沒有副作用，不需再單獨消融。
 - [ ] **floor 預設**：共用程式預設關閉；Track1 yaml 的 `floor_sigma_xy` 0.6 是否改回 0（Kaggle 1.56 版平滑度）；Track3 是否保留，用 `analyze_diag.py` F 區段比較 AE（無 floor，Kaggle 2.01）與 H2（floor 0.6，Kaggle 1.93），抖動可接受才保留。
 - [ ] **Track1 提交版本**：目前 master 的 `result_1.csv` 是 floor 0.6（Kaggle 1.62）；1.56 的版本是 commit `5597dfe`（本地 E 1.79，無 A）。
-- [~] **A 的 xy 偏移格**（P0-5 已驗證原因：只搜 yaw 時 Track1 前 300 幀回到舊版水準 rms 1.49，預設格 2.16；**待使用者決定是否把 Track1 yaml 設為 `init_search_xy_offsets: [0.0]`**）：Track1 起點被 A 移 (+1.8,+1.2) m（舊版 (−0.7,+0.8)→新版 (+1.1,+2.0)）；驗證 `init_search_xy_offsets: [0.0]`（Track1 前 300 幀，起點誤差與前 300 幀 rms 是否回到舊版 1.24/1.66）。
+- [x] **A 的 xy 偏移格**（P0-5 驗證原因：只搜 yaw 時 Track1 前 300 幀回到舊版水準 rms 1.49，預設格 2.16；**已採用：Track1 yaml 設 `init_search_xy_offsets: [0.0]`，Track2／3 yaml 不動**；Track1 的正式結果檔需重新產生）：Track1 起點被 A 移 (+1.8,+1.2) m（舊版 (−0.7,+0.8)→新版 (+1.1,+2.0)）；驗證 `init_search_xy_offsets: [0.0]`（Track1 前 300 幀，起點誤差與前 300 幀 rms 是否回到舊版 1.24/1.66）。
 
 **P1 Track3 量測尺度（最大的缺口）**
 - [ ] **2a 全程尺度剖面（診斷，不改演算法）**：以 H2 的位姿為起點，每 50 幀對 `ply_scale` 6.5–10 做單幀對齊（`matcher_bench` guess 模式），看最佳尺度在行駛段是否也大幅漂移。決定做 G 或多假設。

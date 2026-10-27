@@ -38,7 +38,7 @@ int LocalizationApp::Start(int argc, char** argv) {
         return -1;
     }
     diag_file_.open(output_path.string() + ".diag.csv");
-    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,trail_delta_deg,trail_applied\n";
+    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,trail_delta_deg,trail_applied,side_share,side_active\n";
 
     if (yaw_bank_enabled_) {
         bank_file_.open(output_path.string() + ".bank.csv");
@@ -113,6 +113,15 @@ bool LocalizationApp::LoadParameters() {
     declare_double("ndt_transformation_epsilon", ndt_config_.transformation_epsilon);
     declare_int("ndt_max_iterations", ndt_config_.max_iterations);
 
+    declare_bool("side_balance_enabled", side_config_.enabled);
+    declare_double("side_balance_left_share_min", side_config_.left_share_min);
+    declare_double("side_balance_lon_max", side_config_.lon_max);
+    declare_double("side_balance_lat_min", side_config_.lat_min);
+    declare_double("side_balance_lat_max", side_config_.lat_max);
+    declare_double("side_balance_z_low", side_config_.z_low);
+    declare_double("side_balance_z_high", side_config_.z_high);
+    declare_int("side_balance_min_points", side_config_.min_points);
+    declare_double("side_balance_yaw_sigma_deg", side_config_.yaw_sigma_deg);
     declare_bool("trail_heading_enabled", trail_config_.enabled);
     declare_double("trail_heading_z_band", trail_config_.z_band);
     declare_double("trail_heading_lon_half", trail_config_.lon_half);
@@ -470,7 +479,8 @@ bool LocalizationApp::RunLocalization() {
             StateEstimator::UpdateInfo info;
             bool stationary = false;
             bool converged = false;
-            double fitness = -1.0, spread_lon = 0.0, n_eff = 0.0;
+            double fitness = -1.0, spread_lon = 0.0, n_eff = 0.0, side_share = 0.0;
+            int side_active = 0;
         };
         const auto step = [&](StateEstimator& est) {
             StepResult r;
@@ -519,7 +529,17 @@ bool LocalizationApp::RunLocalization() {
                         // 第 0 幀：init_guess 帶雜訊，直接以 NDT 結果作為濾波器初值
                         est.Initialize(merged.pose, est.bias(), bias_sigma);
                     } else {
-                        r.info = est.Update(merged.pose, merged.spread_cov, r.stationary);
+                        Eigen::Matrix3d extra_cov = merged.spread_cov;
+                        if (side_config_.enabled && !map_manager.submap()->empty()) {
+                            const auto side = SideBalance(side_config_).Estimate(*map_manager.submap(), r.guess, est.yaw());
+                            r.side_share = side.share;
+                            r.side_active = side.active ? 1 : 0;
+                            if (side.active) {
+                                const double sigma = side_config_.yaw_sigma_deg * M_PI / 180.0;
+                                extra_cov(2, 2) += sigma * sigma / std::max(estimator_config_.spread_gain, 1e-9);
+                            }
+                        }
+                        r.info = est.Update(merged.pose, extra_cov, r.stationary);
                     }
                 }
             }
@@ -631,7 +651,7 @@ bool LocalizationApp::RunLocalization() {
         diag_file_ << ',' << sigma_lon << ',' << sigma_lat << ',' << sigma_yaw << ',' << result.spread_lon << ',' << result.n_eff << ',' << shown.accel_bias();
         const auto yaw_of = [](const Eigen::Matrix4f& T) { return std::atan2(T(1, 0), T(0, 0)); };
         diag_file_ << ',' << guess_out(0, 3) << ',' << guess_out(1, 3) << ',' << yaw_of(guess_out) << ',' << measured(0, 3) << ','
-                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << trail_delta_deg << ',' << trail_applied << '\n';
+                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << trail_delta_deg << ',' << trail_applied << ',' << result.side_share << ',' << result.side_active << '\n';
         ++processed;
         rclcpp::spin_some(node_);
 

@@ -157,6 +157,8 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 
 ## 6. 待辦清單
 
+- [ ] **【中斷，待續】左右不平衡降權 `SideBalance`（`side_balance_*`，預設關閉；程式已提交、已編譯，全長驗證尚未跑完）**：做法＝地圖算位姿前方 0–25 m、橫向 2–20 m、離地 −0.5～+3 m 的左右垂直結構點數，左側比例 L/(L+R) >0.45 時替 yaw 量測加額外 σ 6°（`extra_cov(2,2)`，不動 `StateEstimator`）。**1 m 地圖上的指標不夠專一**：Track3 左側比例 700–1000 幀 0.46～0.53（+4° 形成窗口），但 0–175 幀 0.33～0.74、2400–2475 幀 0.57～0.70、轉彎後 2625 幀起 0.57～0.72 也高（那些位置沒有同樣的 +4° 累積）；Track1 >0.42 的比例 23%、Track2 70%（Track1／2 預設關閉）。→ 預期會在轉彎後誤降權，吃掉 NDT 的 yaw 修正，需看全長結果。**續跑**：在 `midterm01/` 下 `bash src/localization/tools/run_track.sh Track3 sb1 -p side_balance_enabled:=true`（Track3 預設已是 `bt1` 設定）；位元驗證：`run_track.sh Track1 sbOff1`、`Track2 sbOff2`、`Track3 sbOff3` 各自 `cmp` 對 `rhp1s4`／`rhp2`／`bt1`（`Track3_bt1.txt`）。判讀：700–1000 幀的 +4°、起步 2150–2300 幀的偏轉、轉彎後（2625 幀起）是否被誤降權。10/27 因使用者關機，四個 run 在啟動 16 秒後被停止，半截檔已刪除。
+
 **P0 提交前**
 - [x] Track1 正式結果＝`yb1`（見 §2）。
 - [ ] 重新產生並提交 Track3 正式結果（`Track3_result.txt`／`result_3.csv`；候選 `zb0`）；Track2 純 yaml 重跑驗證（逐位元對 `mg2nofloor`）。

@@ -22,6 +22,16 @@
     ndt_max_iterations: 35
 
 
+    # 前方左側垂直結構比例 L/(L+R) 高時，替 yaw 量測加額外標準差，讓陀螺儀與軌跡線主導航向（只用地圖）
+    side_balance_enabled: false
+    side_balance_left_share_min: 0.45
+    side_balance_lon_max: 25.0
+    side_balance_lat_min: 2.0
+    side_balance_lat_max: 20.0
+    side_balance_z_low: -0.5
+    side_balance_z_high: 3.0
+    side_balance_min_points: 200
+    side_balance_yaw_sigma_deg: 6.0
     # 地圖軌跡線（建圖車行駛軌跡、相機高度的細長點雲線）的方向當航向量測；與影像點雲的尺度無關
     trail_heading_enabled: false
     trail_heading_z_band: 0.5

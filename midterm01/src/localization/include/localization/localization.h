@@ -25,6 +25,7 @@
 #include "localization/imu_processor.h"
 #include "localization/initial_pose_search.h"
 #include "localization/road_heading_prior.h"
+#include "localization/side_balance.h"
 #include "localization/trail_heading.h"
 #include "localization/map_manager.h"
 #include "localization/measurement_fusion.h"
@@ -108,6 +109,7 @@ private:
     MapManager::Config map_config_;
     NdtMatcher::Config ndt_config_;
     InitialPoseSearch::Config init_search_config_;
+    SideBalance::Config side_config_;    // 前方左側結構比例高時替 yaw 量測加額外標準差（預設關閉）
     TrailHeading::Config trail_config_;  // 地圖軌跡線方向當航向量測（預設關閉）
     RoadHeadingPrior::Config road_heading_config_;  // 第 0 幀以地圖牆面方向修正 init_guess 的 yaw（預設關閉）
     bool init_search_dump_ = false;  // 診斷：把第 0 幀搜尋的每個起點結果寫成 <save_file>.initsearch.csv

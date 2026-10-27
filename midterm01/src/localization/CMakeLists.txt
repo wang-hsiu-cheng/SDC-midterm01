@@ -37,6 +37,7 @@ add_library(localization_core
   src/measurement_fusion.cpp
   src/ndt_matcher.cpp
   src/road_heading_prior.cpp
+  src/side_balance.cpp
   src/state_estimator.cpp
   src/trail_heading.cpp
 )

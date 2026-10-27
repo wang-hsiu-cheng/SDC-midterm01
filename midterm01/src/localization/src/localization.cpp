@@ -140,6 +140,12 @@ bool LocalizationApp::LoadParameters() {
     declare_double("trail_heading_sigma_deg", trail_config_.sigma_deg);
     declare_int("trail_heading_period_frames", trail_config_.period_frames);
     declare_bool("trail_heading_when_stationary", trail_config_.when_stationary);
+    declare_bool("trail_heading_yaw_only", trail_config_.yaw_only);
+    declare_bool("trail_heading_ground_relative", trail_config_.ground_relative);
+    declare_double("trail_heading_layer_height", trail_config_.layer_height);
+    declare_double("trail_heading_ground_radius", trail_config_.ground_radius);
+    declare_double("trail_heading_ground_z_low", trail_config_.ground_z_low);
+    declare_double("trail_heading_ground_z_high", trail_config_.ground_z_high);
     declare_bool("road_heading_enabled", road_heading_config_.enabled);
     declare_double("road_heading_radius", road_heading_config_.radius);
     declare_double("road_heading_cell", road_heading_config_.cell);
@@ -643,7 +649,7 @@ bool LocalizationApp::RunLocalization() {
             const auto trail = TrailHeading(trail_config_).Estimate(*map_manager.submap(), estimator.pose(), estimator.yaw());
             if (trail.found) {
                 trail_delta_deg = trail.delta_rad * 180.0 / M_PI;
-                estimator.UpdateHeading(trail.delta_rad, trail_config_.sigma_deg * M_PI / 180.0);
+                estimator.UpdateHeading(trail.delta_rad, trail_config_.sigma_deg * M_PI / 180.0, trail_config_.yaw_only);
                 trail_applied = 1;
             }
         }

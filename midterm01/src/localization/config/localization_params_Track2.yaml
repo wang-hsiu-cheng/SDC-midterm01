@@ -54,6 +54,12 @@
     trail_heading_sigma_deg: 2.0
     trail_heading_period_frames: 5
     trail_heading_when_stationary: false
+    trail_heading_yaw_only: false           # 只更新 yaw 狀態；停等量測時避免交叉協方差帶動位置、速度、零偏
+    trail_heading_ground_relative: false    # 高度帶改相對地面（位姿 z 漂移時圖層點不掉出高度帶）
+    trail_heading_layer_height: 1.8
+    trail_heading_ground_radius: 4.0
+    trail_heading_ground_z_low: -4.0
+    trail_heading_ground_z_high: -0.5
     # 第 0 幀以地圖牆面主方向修正 init_guess 的 yaw（只用地圖與 init_guess；差超過 max_dev 就放棄）
     road_heading_enabled: true
     road_heading_radius: 30.0

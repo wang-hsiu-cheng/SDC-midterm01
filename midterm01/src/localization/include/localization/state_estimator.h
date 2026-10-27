@@ -83,7 +83,8 @@ public:
     void UpdatePosition(double x, double y, double sigma);
 
     // 外部航向量測（例如地圖軌跡線的方向）：delta = 量測 yaw − 目前 yaw（已包到 ±π），sigma 為量測標準差（rad）
-    void UpdateHeading(double delta, double sigma);
+    // yaw_only：只更新 yaw 狀態（其餘列的增益歸零），避免重複量測經交叉協方差把位置、速度、零偏帶走
+    void UpdateHeading(double delta, double sigma, bool yaw_only = false);
 
     // T_meas：NDT 的 T_map_body；
     // extra_cov：量測在 (x, y, yaw) 地圖座標下的額外協方差（例如多起點候選的分散度）

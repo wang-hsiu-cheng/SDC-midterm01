@@ -27,6 +27,15 @@ public:
         double sigma_deg = 2.0;        // 航向量測標準差
         int period_frames = 5;         // 每幾幀量一次
         bool when_stationary = false;  // 靜止時是否量測（靜止時 NDT 的 yaw 被凍結，線也會因停等累積點而變粗）
+        bool yaw_only = false;         // 只更新 yaw 狀態（不經交叉協方差帶動位置、速度、零偏）
+
+        // 高度帶相對地面：位姿 z 會漂（轉彎中 5.6→6.4 m），圖層點就掉出 ±z_band。改成「位姿下方地圖地面 + layer_height」
+        bool ground_relative = false;
+        double layer_height = 1.8;     // m，軌跡線層相對地面的高度（資料：地面在位姿下方 1.75～2.0 m、圖層在位姿 ±0.25 m）
+        double ground_radius = 4.0;    // m，估地面用的水平範圍
+        double ground_z_low = -4.0;    // m，相對位姿 z 的估地面高度範圍
+        double ground_z_high = -0.5;
+
     };
 
     struct Result {

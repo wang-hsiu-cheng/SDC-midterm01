@@ -117,10 +117,15 @@ void StateEstimator::UpdatePosition(double x, double y, double sigma) {
     pose_(1, 3) = static_cast<float>(state_(1));
 }
 
-void StateEstimator::UpdateHeading(double delta, double sigma) {
+void StateEstimator::UpdateHeading(double delta, double sigma, bool yaw_only) {
     const double yaw_before = state_(2);
     const double s = cov_(2, 2) + sigma * sigma;
-    const Vector7 k = cov_.col(2) / s;
+    Vector7 k = cov_.col(2) / s;
+    if (yaw_only) {
+        const double k_yaw = k(2);
+        k.setZero();
+        k(2) = k_yaw;
+    }
     state_ += k * delta;
     state_(2) = WrapAngle(state_(2));
     state_(3) = std::clamp(state_(3), 0.0, config_.max_speed);

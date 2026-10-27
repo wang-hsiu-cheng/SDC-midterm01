@@ -113,6 +113,18 @@ bool LocalizationApp::LoadParameters() {
     declare_double("ndt_transformation_epsilon", ndt_config_.transformation_epsilon);
     declare_int("ndt_max_iterations", ndt_config_.max_iterations);
 
+    std::string matcher_name = "ndt";
+    declare_string("matcher", matcher_name);
+    declare_double("gicp_max_correspondence", ndt_config_.gicp_max_correspondence);
+    declare_int("gicp_k", ndt_config_.gicp_k);
+    declare_double("gicp_transformation_epsilon", ndt_config_.gicp_transformation_epsilon);
+    declare_double("gicp_probability_tau", ndt_config_.gicp_probability_tau);
+    if (matcher_name != "ndt" && matcher_name != "gicp") {
+        RCLCPP_ERROR(node_->get_logger(), "Unknown matcher '%s' (ndt | gicp).", matcher_name.c_str());
+        return false;
+    }
+    ndt_config_.use_gicp = (matcher_name == "gicp");
+
     declare_bool("gnss_prior_enabled", gnss_config_.enabled);
     declare_bool("gnss_prior_use_xy", gnss_config_.use_xy);
     declare_bool("gnss_prior_use_yaw", gnss_config_.use_yaw);

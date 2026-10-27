@@ -280,3 +280,13 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 **Track1（GNSS 本地 E）**：`5597dfe` 1.79（Kaggle 1.56）｜floor 0 ＋A 搜 xy 格（N0）1.9083｜同上＋xy `[0.0]` 前 300 幀 rms 1.49（舊版 1.47）｜floor 0.6（`047f72a`）1.7328（Kaggle 1.62）｜自適應 floor AD1／AD2 1.7818／1.7769｜ScaleEstimator 開 2.238｜累積點雲 K=4／10 1.94／487。
 **Track3（無 GNSS；平滑度＝位置加速度中位）**：AE 0.0079、H2 0.0369、`zb0` 0.0089；`final_fitness` 每 500 幀中位 `zb0` 0.235／0.229／0.213／0.279／0.241／0.294／0.286（第 1500–2000 與轉彎後偏高）；位姿相對陀螺儀積分每 500 幀末 `zb0` +1.2／+4.9／+5.0／+5.1／+9.2／+0.2／−0.3°。
 **Track2（GNSS 本地 E）**：收斂前全長 218–670；純 yaml（floor 0.6）2.274；併入 floor 0.6 後 16.96（只關 hold 16.13、只關 floor 2.277、兩者都關 2.217、floor_xy 0.2 2.349、0.3 2.622）；floor 0 的 `mg2nofloor` 2.2773（rmse_p 1.363 m、yaw 4.57°）。
+
+**G-ICP 路線（分支 `worktree-gicp-with-optimizations`，從 master `bf975ae` 起；`NdtMatcher` 加 `use_gicp` 開關，參數 `matcher: ndt|gicp`，預設 ndt；Track1 前 300 幀逐位元與已提交 `Track1_result.txt` 相同，Track2／3 未驗證）**
+- **乾淨基準**（`worktree-clean-scan-matching-baseline`，純 tracking、init_guess 當初值、無 IMU／GNSS／濾波；六種配準器）Track1 全長 GNSS 本地 E：G-ICP 20.6、ICP 130、MS-NDT 497、Robust ICP 518、NDT 572、KISS-ICP 式 617。
+- **G-ICP 套 master 優化的演進**（Track1 全長 3011 幀，GNSS 先驗關閉，對 GNSS 本地 E；NDT 無 GNSS 的 `rhp1s4` 為 1.7578）：
+  - S0 單起點（k 20、corr 2.0、`meas_sigma_lon` 1.1）：前 300 幀 6.20（NDT 2.01）。診斷：縱向誤差 2→7 m，G-ICP 量測縱向逐幀跳 ±0.5～1.1 m 且前幾幀偏正，EKF 把速度灌高 25%（3.46 vs GNSS 2.78 m/s）。
+  - 調 `meas_sigma_lon`（單起點，600 幀）：1.1／2.2／3.3／4.4／5.5／6.6／8.8＝4.74／4.61／1.86／2.27／2.65／2.75／33.1；全長 3.3、4.4＝83.0、48.1（1763 幀起發散：1600–1700 幀量測縱向修正 80% 為正、濾波速度 +1.5 m/s）。
+  - 調 `gicp_k`／`gicp_max_correspondence`（單起點，`meas_sigma_lon` 3.3，前 1800 幀 E）：基準 3.20；corr 1.0／1.5／3.0／5.0＝2.03／2.84／1.94／1.92；k 10／30／50＝1.78／159.2（發散）／3.90；k 10＋corr 3.0 全長 E 7.32（2100 幀起發散）。
+  - **S3 多起點（縱向 0／±1.5／±3 m）＋fitness 軟加權**（`probability = exp(-fitness/τ)`，k 10、corr 3.0）：τ 0.01 全長 1.84、τ 0.003 1.95；`meas_sigma_lon` 重調（τ 0.01）1.1／2.2／3.3／4.4＝**1.72**／1.85／1.84／1.82，取 1.1（位置最大 2.62 m）。每幀約 230–265 ms。
+  - S3 Track2（`localization_params_Track2_gicp.yaml`，GNSS 關）全長 E 1.7694（NDT `rhp2` 1.7513）；Track3（`localization_params_Track3_gicp.yaml`）無真值，相對 `bt1` 位置差 rms 1.02 m、yaw 0.78°，Kaggle 未提交。
+- 不採用／教訓：單一旋鈕（量測雜訊、k、corr）只能把失敗點往後推（1600→2100 幀），因為 G-ICP 的縱向偏差是系統性的；多起點分散度當不確定度才解決。`gicp_k` 對結果非單調（k 30 在 1500 幀前就發散，原因未查）。

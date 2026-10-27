@@ -1,8 +1,15 @@
 #include "localization/ndt_matcher.h"
 
+#include <cmath>
+
 namespace localization {
 
-NdtMatcher::NdtMatcher(const Config& config) {
+NdtMatcher::NdtMatcher(const Config& config) : config_(config) {
+    gicp_.setMaxCorrespondenceDistance(config.gicp_max_correspondence);
+    gicp_.setCorrespondenceRandomness(config.gicp_k);
+    gicp_.setMaximumIterations(config.max_iterations);
+    gicp_.setTransformationEpsilon(config.gicp_transformation_epsilon);
+    gicp_.setEuclideanFitnessEpsilon(config.gicp_transformation_epsilon);
     ndt_.setResolution(static_cast<float>(config.resolution));
     ndt_.setStepSize(config.step_size);
     ndt_.setTransformationEpsilon(config.transformation_epsilon);
@@ -10,7 +17,12 @@ NdtMatcher::NdtMatcher(const Config& config) {
 }
 
 void NdtMatcher::SetTarget(Cloud::ConstPtr target) {
-    ndt_.setInputTarget(target);
+    // G-ICP 的 target 協方差只在換子地圖時算一次
+    if (config_.use_gicp) {
+        gicp_.setInputTarget(target);
+    } else {
+        ndt_.setInputTarget(target);
+    }
     target_ = target;
     if (target_ && !target_->empty()) target_tree_.setInputCloud(target_);
 }
@@ -35,6 +47,14 @@ double NdtMatcher::FitnessAt(Cloud::ConstPtr source, const Eigen::Matrix4f& pose
 bool NdtMatcher::Align(Cloud::ConstPtr source, const Eigen::Matrix4f& guess, Eigen::Matrix4f& T_map_body,
                        double& fitness, double& probability) {
     Cloud aligned;
+    if (config_.use_gicp) {
+        gicp_.setInputSource(source);
+        gicp_.align(aligned, guess);
+        T_map_body = gicp_.getFinalTransformation();
+        fitness = gicp_.getFitnessScore(1.0);
+        probability = std::exp(-fitness / config_.gicp_probability_tau);
+        return gicp_.hasConverged() && T_map_body.allFinite() && std::isfinite(fitness);
+    }
     ndt_.setInputSource(source);
     ndt_.align(aligned, guess);
     T_map_body = ndt_.getFinalTransformation();

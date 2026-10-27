@@ -8,6 +8,7 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/kdtree/kdtree_flann.h>
+#include <pcl/registration/gicp.h>
 #include <pcl/registration/ndt.h>
 
 namespace localization {
@@ -19,6 +20,15 @@ public:
         double step_size = 0.2;
         double transformation_epsilon = 0.01;
         int max_iterations = 35;
+
+        // 配準器：預設 NDT；use_gicp 時改用 G-ICP（其餘 NDT 參數不使用，max_iterations 共用）。
+        // G-ICP 沒有 transformation probability，以 exp(-fitness / probability_tau) 代替：同一幀內單調遞減於 fitness，
+        // 所以「挑 probability 最大」與「軟加權」都等於以 fitness 排序
+        bool use_gicp = false;
+        double gicp_max_correspondence = 2.0;
+        int gicp_k = 20;
+        double gicp_transformation_epsilon = 1e-4;
+        double gicp_probability_tau = 0.1;
     };
 
     using Cloud = pcl::PointCloud<pcl::PointXYZ>;
@@ -48,7 +58,9 @@ public:
     std::vector<Candidate> AlignAll(Cloud::ConstPtr source, const std::vector<Eigen::Matrix4f>& guesses);
 
 private:
+    Config config_;
     pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> ndt_;
+    pcl::GeneralizedIterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> gicp_;
     Cloud::ConstPtr target_;
     pcl::KdTreeFLANN<pcl::PointXYZ> target_tree_;
 };

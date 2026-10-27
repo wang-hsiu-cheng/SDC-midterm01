@@ -29,21 +29,21 @@
 | T3 | A＋E（`6e289ca`） | — | 2.01 | |
 | T3 | A＋E＋hold＋floor 0.6（H2，`f81f508`） | — | **1.93** | 距 baseline 1.29 仍差 0.64 |
 | T2 | 收斂版，floor 0（`mg2nofloor`） | 2.2773 | 未提交 | `result_2.csv` 已提交；先前全部設定發散（E 218–670） |
-| T1 | GNSS 先驗 只用 xy（`gx`，分支 `feature/gnss-prior`，σxy 0.7 m） | 循環不可比 | **1.17**（使用者回報） | 助教許可（使用者口頭回報）；規則 4 例外，僅此開關 |
+| T1 | GNSS 先驗 只用 xy（`gx`，分支 `feature/gnss-prior`，σxy 0.7 m） | 循環不可比 | **1.17**（使用者回報） | 官方文件明文允許 GNSS（使用者說明）；`gnss_prior_*` 開關 |
 | T1 | GNSS 先驗 只用 yaw（`gy`，σyaw 2°） | 循環不可比 | **1.47** | |
 | T1 | **GNSS 先驗 xy＋yaw（`gb`）** | 循環不可比 | **1.13**（最佳） | 排名（private＋public）確實上升（使用者回報） |
 | T2 | GNSS 先驗 只用 xy（`g2x`，σxy 0.7 m） | 循環不可比 | **0.78**（使用者回報） | 現行 `rhp2` 為 1.46 |
 | T2 | GNSS 先驗 只用 yaw（`g2y`，σyaw 2°） | 循環不可比 | **1.38** | |
 | T2 | **GNSS 先驗 xy＋yaw（`g2b`）** | 循環不可比 | **0.77**（最佳） | |
 | T2 | 牆面方向先驗＋σ_yaw=4（`rhp2`，`5d73bca`；現行正式結果） | 1.7513（rmse_p 1.169、yaw 2.91°） | **1.46**（使用者回報，已過 baseline 1.92） | `Track2_result.txt`／`result_2.csv` 為此版（`edcd591`）；未確認 1.46 是否為此版，待使用者確認 |
-| T3 | `zb0`（A＋E＋hold，floor 0；現行官方 `Track3_result.txt`） | — | 2.01 | 比 H2 差 0.08 |
+| T3 | `zb0`（A＋E＋hold，floor 0；先前的官方 `Track3_result.txt`） | — | 2.01 | 比 H2 差 0.08 |
 | T3 | `ba2`（`process_sigma_accel_bias` 0.002） | — | 2.01 | public 只評前段，`ba` 差異在 2100 幀後 |
 | T3 | `ba05`（`process_sigma_accel_bias` 0.0005） | — | 2.02 | 同上 |
-| T3 | **`bt1`（`ba2`＋軌跡線航向量測 `trail_heading_enabled`，`8ce81bf`；`-p` 覆寫產生，yaml 尚未更新）** | — | **1.87**（使用者回報） | 距 baseline 1.29 差 0.58；軌跡線在 0–900 幀套用 179 幀，動到 public 區段 |
+| T3 | **`bt1`（`ba2`＋軌跡線航向量測 `trail_heading_enabled`；現行官方 `Track3_result.txt`／`result_3.csv`）** | — | **1.87**（使用者回報） | 距 baseline 1.29 差 0.58；yaml 已是 `bt1` 設定，純 yaml 全長 run `gOff3` 與 `bt1` 逐位元相同；軌跡線在 0–900 幀套用 179 幀，動到 public 區段 |
 
 ### 結果檔與 yaml 的對應（提交前必須處理）
-- **Track1／Track2：官方結果＝GNSS 先驗 xy＋yaw 版（`gb`／`g2b`；分支 `feature/gnss-prior`）**：`Track1_result.txt`／`result_1.csv`（Kaggle public 1.13）、`Track2_result.txt`／`result_2.csv`（Kaggle public 0.77）；yaml 已啟用 `gnss_prior_enabled: true`（σxy 0.7 m、σyaw 2°）。助教許可 Track1／2 使用 GNSS 先驗（使用者口頭回報，請留存證據；規則 4 的例外）。yaml 與 `-p` 覆寫等價：純 yaml 前 600 幀（`vy1`／`vy2`）與 `gb`／`g2b` 前 600 行逐位元相同（全長未重跑）。`result_1.csv`／`result_2.csv` 與先前提交的 `result_1_gnss_both.csv`／`result_2_gnss_both.csv` 位元組相同。無 GNSS 版 `rhp1s4`／`rhp2` 在 `worktree-diag-final-fitness` 分支與 result 目錄仍可取得。Track3 維持 `bt1`（bag 沒有 GNSS）。
-- Track3 候選：`zb0`（floor 0、hold 開，純 yaml，只在 worktree 的未追蹤結果裡）。Track2 純 yaml 版尚未重跑驗證逐位元相同（現有的是 `-p` 覆寫的 `mg2nofloor`）。
+- **Track1／Track2：官方結果＝GNSS 先驗 xy＋yaw 版（`gb`／`g2b`；分支 `feature/gnss-prior`）**：`Track1_result.txt`／`result_1.csv`（Kaggle public 1.13）、`Track2_result.txt`／`result_2.csv`（Kaggle public 0.77）；yaml 已啟用 `gnss_prior_enabled: true`（σxy 0.7 m、σyaw 2°）。官方文件明文允許使用 GNSS（使用者說明；先前「不用 GNSS」是使用者與 Claude 自訂的目標，不是競賽規則，CLAUDE.md 規則 4 已更新）。yaml 與 `-p` 覆寫等價：純 yaml 前 600 幀（`vy1`／`vy2`）與 `gb`／`g2b` 前 600 行逐位元相同（全長未重跑）。`result_1.csv`／`result_2.csv` 與先前提交的 `result_1_gnss_both.csv`／`result_2_gnss_both.csv` 位元組相同。無 GNSS 版 `rhp1s4`／`rhp2` 在 `worktree-diag-final-fitness` 分支與 result 目錄仍可取得。Track3 維持 `bt1`（bag 沒有 GNSS）。
+- **Track3：官方結果＝`bt1`**（`process_sigma_accel_bias` 0.002＋`trail_heading_enabled: true`，Kaggle public 1.87）：`Track3_result.txt`／`result_3.csv`；Track3 預設 yaml 全長 run（`gOff3`）與 `bt1` 逐位元相同（可由 yaml 重現）。
 - master 工作區的 `build/`、`install/` 常是舊的（git 不會更新它們）：在 master 跑之前先 `colcon build`。
 
 ### 資料
@@ -146,7 +146,7 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 
 30. **左右不平衡降權 `SideBalance`（Track3 `bt1` 設定＋`-p side_balance_enabled:=true`，run `sb1`；全長）**：地圖算位姿前方 0–25 m、橫向 2–20 m、離地 −0.5～+3 m 的左右垂直結構點數，左側比例 L/(L+R) >0.45 時替 yaw 量測加額外 σ 6°（`extra_cov(2,2)`）。**預設（關閉）Track1／2／3 全長與 `rhp1s4`／`rhp2`／`bt1` 逐位元相同（Track3 預設 yaml 與 `bt1` 的 `-p` 覆寫一致）。** 降權啟動 1063／3142 幀（34%）：0–200 幀 129／200、200–700 幀 25／500、700–1100 幀 141／400、1100–2150 幀 0／1050（停等，凍結 yaw）、2150–2400 幀 134／250、2400–2625 幀 117／225、**2625–3142 幀 517／517（誤觸發，左側比例 0.64）**。對 `bt1`：輸出−IMU 姿態 800／900／1200 幀 +2.5／+3.3／+3.8° → +2.1／+3.0／+3.6°（僅少 0.2～0.4°）；2300 幀 +4.6° → +2.4°（起步後少偏 2.2°）；紅燈結束 2150→2300 yaw 變化 +0.5° → −1.5°；2650 幀 +1.6° → +3.2°、終點 +0.9° → +1.9°（轉彎後略差）；位置差全程 ≤1.0 m（2500 幀 lon −1.0、其餘 <0.5 m）；2300→終點路徑同為 109.1 m；平均 `final_fitness` 0.2502 → 0.2528（略差）。→ **效果小且有正有負：+4° 形成窗口（700–1000 幀）只少約 0.3°（降權只在 700–1100 幀的 35% 幀啟動），起步後少偏 2.2° 但紅燈結束反向轉 1.5°，轉彎後略差；位置幾乎不變。左側比例指標不專一（0–200 與 2625 後誤觸發）如預期。不建議採用**（程式保留，預設關閉）。
 
-31. **GNSS 先驗（分支 `feature/gnss-prior`，10/27；助教許可 Track1／2 在演算法內使用，使用者口頭回報，請留存證據；規則 4 的例外，僅此開關，預設關閉）**：`GnssPrior`（讀 bag `/localizer_node/gnss_pose`，只回傳時間戳 ≤ 影格時間且未用過的最新一筆；causal）＋`StateEstimator::UpdatePosition`（新增）＋既有 `UpdateHeading`；位置以濾波器速度與航向外推到影格時間，σ＝√(σxy²＋(0.3·v·age)²)；每筆 GNSS 用一次（約每 7 幀，Track1 共 433 次）。參數 `gnss_prior_{enabled,use_xy,use_yaw,sigma_xy,sigma_yaw_deg,max_age_ms}`，三份 yaml 預設關閉（Track3 的 bag 沒有 GNSS）；diag 多 `gnss_xy_applied`、`gnss_yaw_applied`。**預設（關閉）Track1／2／3 全長與 `rhp1s4`／`rhp2`／`bt1` 逐位元相同。** 權重（使用者選）σxy 0.7 m、σyaw 2°。Track1 三版（run `gx`＝只用 xy、`gy`＝只用 yaw、`gb`＝全部）；Kaggle csv：`result_1_gnss_xy.csv`、`result_1_gnss_yaw.csv`、`result_1_gnss_both.csv`（未覆蓋 `result_1.csv`）。**本地對 GNSS 的 E 已循環（使用 GNSS 的版本不可當成績）**，僅供一致性檢查：`rhp1s4` 1.7578、`gx` 1.3216、`gy` 1.6865、`gb` 1.2418；相對 `rhp1s4` 位置差中位 0.43／0.08／0.43 m（最大 2.2／0.46／2.2 m）。Kaggle 分數待使用者提交。Track2 尚未跑（待 Track1 結果）。
+31. **GNSS 先驗（分支 `feature/gnss-prior`，10/27；官方文件明文允許 GNSS（使用者說明；「不用 GNSS」是自訂目標，非競賽規則），預設關閉、逐 track 以 yaml 啟用）**：`GnssPrior`（讀 bag `/localizer_node/gnss_pose`，只回傳時間戳 ≤ 影格時間且未用過的最新一筆；causal）＋`StateEstimator::UpdatePosition`（新增）＋既有 `UpdateHeading`；位置以濾波器速度與航向外推到影格時間，σ＝√(σxy²＋(0.3·v·age)²)；每筆 GNSS 用一次（約每 7 幀，Track1 共 433 次）。參數 `gnss_prior_{enabled,use_xy,use_yaw,sigma_xy,sigma_yaw_deg,max_age_ms}`，三份 yaml 預設關閉（Track3 的 bag 沒有 GNSS）；diag 多 `gnss_xy_applied`、`gnss_yaw_applied`。**預設（關閉）Track1／2／3 全長與 `rhp1s4`／`rhp2`／`bt1` 逐位元相同。** 權重（使用者選）σxy 0.7 m、σyaw 2°。Track1 三版（run `gx`＝只用 xy、`gy`＝只用 yaw、`gb`＝全部）；Kaggle csv：`result_1_gnss_xy.csv`、`result_1_gnss_yaw.csv`、`result_1_gnss_both.csv`（未覆蓋 `result_1.csv`）。**本地對 GNSS 的 E 已循環（使用 GNSS 的版本不可當成績）**，僅供一致性檢查：`rhp1s4` 1.7578、`gx` 1.3216、`gy` 1.6865、`gb` 1.2418；相對 `rhp1s4` 位置差中位 0.43／0.08／0.43 m（最大 2.2／0.46／2.2 m）。Kaggle 分數待使用者提交。Track2 尚未跑（待 Track1 結果）。
 
 32. **Track2 GNSS 先驗三版（`feature/gnss-prior`，10/27；σxy 0.7 m、σyaw 2°，與 Track1 同權重；run `g2x`＝xy、`g2y`＝yaw、`g2b`＝全部）**：行數 3299；GNSS 套用 454 次（前 300 幀 37 次；yaw 假設庫作用期間〔車速 >1 m/s 後約 150 幀〕被跳過）。相對 `rhp2`：位置差中位 0.47／0.14／0.50 m（最大 2.12／2.35／2.52 m）；yaw 差 rms 0.62／1.72／1.75°；**前 300 幀 yaw 差平均 +0.30／+5.08／+5.18°**（yaw 版與全部版把靜止起步的 yaw 往 GNSS 拉了約 5°；本地對 GNSS 評估已循環，不可當成績）。Kaggle csv：`result_2_gnss_xy.csv`、`result_2_gnss_yaw.csv`、`result_2_gnss_both.csv`（未覆蓋 `result_2.csv`）；Kaggle public：xy 0.78、yaw 1.38、both 0.77（現行 `rhp2` 1.46）。
 
@@ -173,7 +173,7 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 
 **P0 提交前**
 - [x] Track1 正式結果＝`yb1`（見 §2）。
-- [ ] 重新產生並提交 Track3 正式結果（`Track3_result.txt`／`result_3.csv`；候選 `zb0`）；Track2 純 yaml 重跑驗證（逐位元對 `mg2nofloor`）。
+- [x] Track3 正式結果已換成 `bt1`（Kaggle 1.87，純 yaml 全長 run `gOff3` 逐位元相同）；Track1／2 正式結果已換成 GNSS 版本（§4-31／32，純 yaml 前 600 幀逐位元相同）。
 - [ ] 回歸：關閉我的功能時三個 track 與已提交結果逐位元相同（Track2 分支只驗到 `e4259e2`，之後的 merge 與 yaml 改動尚未驗）。
 - [ ] Track1 提交：正式版 `yb1`（本地 E 1.8209，尚無 Kaggle 分數）與 `5597dfe` 版（Kaggle 1.56）擇一。
 
@@ -198,7 +198,7 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 ## 7. 待決問題
 
 - [ ] **地圖軌跡點雲（疑似建圖車自己的軌跡）可否用作航向／橫向先驗？** 使用者判斷是助益。它性質接近規則 5 禁止的 Track2 `tl`／`th`（意外遺留），若測試與建圖是同一趟路徑，等於測試車軌跡的紀錄；違規後果是該 track 0 分。**未確認前不實作**；建議寄信助教確認（neal516.en14@nycu.edu.tw）。
-- [ ] 排行榜衝刺版本想連同 GNSS 先驗套用到 Track1：直接違反規則 4（演算法內不使用 GNSS，團隊決議），需團隊同意推翻並向助教確認；該版本不得當作最終 compliant 提交，寫成預設關閉的獨立開關並在報告中說明。
+- [x] GNSS 先驗：官方文件明文允許（使用者說明），已實作並套用到 Track1／2（§4-31／32，Kaggle public Track1 1.13、Track2 0.77）；先前「不用 GNSS」是自訂目標，不是競賽規則。
 - [ ] 是否使用 3cameras_ply（只有 Track1／2）或自行用 MapAnything 產生 Track3 點雲？
 - [ ] 組號（Kaggle team name）、兩位成員學號；Track2 的 baseline 分數。
 - 已決：GNSS 演算法內三個 track 都不使用，只作 Track1／2 本地評估；A 以 IMU 姿態 yaw 當搜尋「候選」（最終由 NDT 決定）視為合規。

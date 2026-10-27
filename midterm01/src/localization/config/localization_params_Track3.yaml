@@ -25,7 +25,7 @@
 
 
     # 地圖軌跡線（建圖車行駛軌跡、相機高度的細長點雲線）的方向當航向量測；與影像點雲的尺度無關
-    trail_heading_enabled: false
+    trail_heading_enabled: true     # Track3：紅燈結束的突然逆時針偏轉靠它修正（STATUS §4-23、§4-25）
     trail_heading_z_band: 0.5
     trail_heading_lon_half: 12.0
     trail_heading_lat_half: 3.0
@@ -75,7 +75,7 @@
     process_sigma_speed: 0.1      # ⚠ 調到 0.6 會發散（Track1），勿放大
     process_sigma_bias: 1.0e-4
     process_sigma_beta: 1.0e-3
-    process_sigma_accel_bias: 0.01
+    process_sigma_accel_bias: 0.002  # Track3：0.01 時 NDT 縱向創新被當成 ba，轉彎時 ba 大幅擺動、太早轉彎（STATUS §4-24）；Track1／2 維持原值
     accel_gain: 1.0               # 前向線加速度（IMU 姿態扣重力後）進預測；0 = 不使用
     max_speed: 40.0
 

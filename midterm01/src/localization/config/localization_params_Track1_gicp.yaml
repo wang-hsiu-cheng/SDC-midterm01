@@ -28,7 +28,7 @@
 
     # GNSS 先驗（助教許可 Track1／2 在演算法內使用，使用者回報；規則 4 的例外，僅此開關）：預設關閉。
     # use_xy／use_yaw 分別決定用位置或航向；Track3 的 bag 沒有 GNSS，不要開
-    gnss_prior_enabled: false     # S0：先不用 GNSS，才能用 GNSS 本地 E 與 NDT 無 GNSS 版（rhp1s4）比較
+    gnss_prior_enabled: true      # S4：GNSS 先驗（xy＋yaw，官方允許，causal）。關閉版（S3）用 -p gnss_prior_enabled:=false 重現
     gnss_prior_use_xy: true
     gnss_prior_use_yaw: true
     gnss_prior_sigma_xy: 0.7

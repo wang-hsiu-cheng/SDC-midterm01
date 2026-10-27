@@ -145,6 +145,8 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 
 31. **GNSS 先驗（分支 `feature/gnss-prior`，10/27；助教許可 Track1／2 在演算法內使用，使用者口頭回報，請留存證據；規則 4 的例外，僅此開關，預設關閉）**：`GnssPrior`（讀 bag `/localizer_node/gnss_pose`，只回傳時間戳 ≤ 影格時間且未用過的最新一筆；causal）＋`StateEstimator::UpdatePosition`（新增）＋既有 `UpdateHeading`；位置以濾波器速度與航向外推到影格時間，σ＝√(σxy²＋(0.3·v·age)²)；每筆 GNSS 用一次（約每 7 幀，Track1 共 433 次）。參數 `gnss_prior_{enabled,use_xy,use_yaw,sigma_xy,sigma_yaw_deg,max_age_ms}`，三份 yaml 預設關閉（Track3 的 bag 沒有 GNSS）；diag 多 `gnss_xy_applied`、`gnss_yaw_applied`。**預設（關閉）Track1／2／3 全長與 `rhp1s4`／`rhp2`／`bt1` 逐位元相同。** 權重（使用者選）σxy 0.7 m、σyaw 2°。Track1 三版（run `gx`＝只用 xy、`gy`＝只用 yaw、`gb`＝全部）；Kaggle csv：`result_1_gnss_xy.csv`、`result_1_gnss_yaw.csv`、`result_1_gnss_both.csv`（未覆蓋 `result_1.csv`）。**本地對 GNSS 的 E 已循環（使用 GNSS 的版本不可當成績）**，僅供一致性檢查：`rhp1s4` 1.7578、`gx` 1.3216、`gy` 1.6865、`gb` 1.2418；相對 `rhp1s4` 位置差中位 0.43／0.08／0.43 m（最大 2.2／0.46／2.2 m）。Kaggle 分數待使用者提交。Track2 尚未跑（待 Track1 結果）。
 
+32. **Track2 GNSS 先驗三版（`feature/gnss-prior`，10/27；σxy 0.7 m、σyaw 2°，與 Track1 同權重；run `g2x`＝xy、`g2y`＝yaw、`g2b`＝全部）**：行數 3299；GNSS 套用 454 次（前 300 幀 37 次；yaw 假設庫作用期間〔車速 >1 m/s 後約 150 幀〕被跳過）。相對 `rhp2`：位置差中位 0.47／0.14／0.50 m（最大 2.12／2.35／2.52 m）；yaw 差 rms 0.62／1.72／1.75°；**前 300 幀 yaw 差平均 +0.30／+5.08／+5.18°**（yaw 版與全部版把靜止起步的 yaw 往 GNSS 拉了約 5°；本地對 GNSS 評估已循環，不可當成績）。Kaggle csv：`result_2_gnss_xy.csv`、`result_2_gnss_yaw.csv`、`result_2_gnss_both.csv`（未覆蓋 `result_2.csv`）；Kaggle 分數待使用者提交（Track2 現行 1.46）。
+
 ## 5. 失敗嘗試與設計決策（報告用）
 
 | 嘗試 | 結果 | 結論 |

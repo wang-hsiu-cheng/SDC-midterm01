@@ -29,6 +29,9 @@
 | T3 | A＋E（`6e289ca`） | — | 2.01 | |
 | T3 | A＋E＋hold＋floor 0.6（H2，`f81f508`） | — | **1.93** | 距 baseline 1.29 仍差 0.64 |
 | T2 | 收斂版，floor 0（`mg2nofloor`） | 2.2773 | 未提交 | `result_2.csv` 已提交；先前全部設定發散（E 218–670） |
+| T1 | GNSS 先驗 只用 xy（`gx`，分支 `feature/gnss-prior`，σxy 0.7 m） | 循環不可比 | **1.17**（使用者回報） | 助教許可（使用者口頭回報）；規則 4 例外，僅此開關 |
+| T1 | GNSS 先驗 只用 yaw（`gy`，σyaw 2°） | 循環不可比 | **1.47** | |
+| T1 | **GNSS 先驗 xy＋yaw（`gb`）** | 循環不可比 | **1.13**（最佳） | 排名（private＋public）確實上升（使用者回報） |
 | T2 | 牆面方向先驗＋σ_yaw=4（`rhp2`，`5d73bca`；現行正式結果） | 1.7513（rmse_p 1.169、yaw 2.91°） | **1.46**（使用者回報，已過 baseline 1.92） | `Track2_result.txt`／`result_2.csv` 為此版（`edcd591`）；未確認 1.46 是否為此版，待使用者確認 |
 | T3 | `zb0`（A＋E＋hold，floor 0；現行官方 `Track3_result.txt`） | — | 2.01 | 比 H2 差 0.08 |
 | T3 | `ba2`（`process_sigma_accel_bias` 0.002） | — | 2.01 | public 只評前段，`ba` 差異在 2100 幀後 |

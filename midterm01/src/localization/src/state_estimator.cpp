@@ -99,6 +99,24 @@ void StateEstimator::UpdateStationary(double yaw_rate_mean, double forward_accel
     state_(3) = std::clamp(state_(3), 0.0, config_.max_speed);
 }
 
+void StateEstimator::UpdatePosition(double x, double y, double sigma) {
+    const double yaw_before = state_(2);
+    Eigen::Matrix<double, 2, kStateSize> H = Eigen::Matrix<double, 2, kStateSize>::Zero();
+    H(0, 0) = H(1, 1) = 1.0;
+    const Eigen::Matrix2d R = Eigen::Matrix2d::Identity() * (sigma * sigma);
+    const Eigen::Matrix2d S = H * cov_ * H.transpose() + R;
+    const Eigen::Matrix<double, kStateSize, 2> K = cov_ * H.transpose() * S.inverse();
+    state_ += K * Eigen::Vector2d(x - state_(0), y - state_(1));
+    state_(2) = WrapAngle(state_(2));
+    state_(3) = std::clamp(state_(3), 0.0, config_.max_speed);
+    const Matrix7 I_KH = Matrix7::Identity() - K * H;
+    cov_ = I_KH * cov_ * I_KH.transpose() + K * R * K.transpose();
+    cov_ = 0.5 * (cov_ + cov_.transpose());
+    ApplyYawDelta(pose_, WrapAngle(state_(2) - yaw_before));
+    pose_(0, 3) = static_cast<float>(state_(0));
+    pose_(1, 3) = static_cast<float>(state_(1));
+}
+
 void StateEstimator::UpdateHeading(double delta, double sigma) {
     const double yaw_before = state_(2);
     const double s = cov_(2, 2) + sigma * sigma;

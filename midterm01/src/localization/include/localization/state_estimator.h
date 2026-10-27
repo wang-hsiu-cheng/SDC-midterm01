@@ -79,6 +79,9 @@ public:
     // 靜止（IMU 窗口判定）時的偽量測：速度 = 0、陀螺儀均值 = 零偏、前向加速度均值 = 加速度零偏。不改位姿
     void UpdateStationary(double yaw_rate_mean, double forward_accel_mean);
 
+    // 外部位置量測（例如 GNSS）：地圖座標下的 (x, y)，sigma 為兩軸共用的標準差（m）
+    void UpdatePosition(double x, double y, double sigma);
+
     // 外部航向量測（例如地圖軌跡線的方向）：delta = 量測 yaw − 目前 yaw（已包到 ±π），sigma 為量測標準差（rad）
     void UpdateHeading(double delta, double sigma);
 

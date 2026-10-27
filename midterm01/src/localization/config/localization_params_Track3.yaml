@@ -24,6 +24,14 @@
     ndt_max_iterations: 35
 
 
+    # GNSS 先驗（助教許可 Track1／2 在演算法內使用，使用者回報；規則 4 的例外，僅此開關）：預設關閉。
+    # use_xy／use_yaw 分別決定用位置或航向；Track3 的 bag 沒有 GNSS，不要開
+    gnss_prior_enabled: false
+    gnss_prior_use_xy: true
+    gnss_prior_use_yaw: true
+    gnss_prior_sigma_xy: 0.7
+    gnss_prior_sigma_yaw_deg: 2.0
+    gnss_prior_max_age_ms: 600.0
     # 前方左側垂直結構比例 L/(L+R) 高時，替 yaw 量測加額外標準差，讓陀螺儀與軌跡線主導航向（只用地圖）
     side_balance_enabled: false
     side_balance_left_share_min: 0.45

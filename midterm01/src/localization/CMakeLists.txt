@@ -31,6 +31,7 @@ include_directories(
 add_definitions(${PCL_DEFINITIONS})
 
 add_library(localization_core
+  src/gnss_prior.cpp
   src/imu_processor.cpp
   src/initial_pose_search.cpp
   src/map_manager.cpp
@@ -44,6 +45,7 @@ add_library(localization_core
 ament_target_dependencies(localization_core
   rclcpp
   sensor_msgs
+  geometry_msgs
   rosbag2_cpp
   rosbag2_storage
   pcl_conversions

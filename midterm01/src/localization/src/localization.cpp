@@ -38,7 +38,7 @@ int LocalizationApp::Start(int argc, char** argv) {
         return -1;
     }
     diag_file_.open(output_path.string() + ".diag.csv");
-    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,trail_delta_deg,trail_applied,side_share,side_active\n";
+    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,trail_delta_deg,trail_applied,side_share,side_active,gnss_xy_applied,gnss_yaw_applied\n";
 
     if (yaw_bank_enabled_) {
         bank_file_.open(output_path.string() + ".bank.csv");
@@ -113,6 +113,13 @@ bool LocalizationApp::LoadParameters() {
     declare_double("ndt_transformation_epsilon", ndt_config_.transformation_epsilon);
     declare_int("ndt_max_iterations", ndt_config_.max_iterations);
 
+    declare_bool("gnss_prior_enabled", gnss_config_.enabled);
+    declare_bool("gnss_prior_use_xy", gnss_config_.use_xy);
+    declare_bool("gnss_prior_use_yaw", gnss_config_.use_yaw);
+    declare_double("gnss_prior_sigma_xy", gnss_config_.sigma_xy);
+    declare_double("gnss_prior_sigma_yaw_deg", gnss_config_.sigma_yaw_deg);
+    declare_double("gnss_prior_max_age_ms", gnss_config_.max_age_ms);
+    declare_string("gnss_topic", gnss_topic_);
     declare_bool("side_balance_enabled", side_config_.enabled);
     declare_double("side_balance_left_share_min", side_config_.left_share_min);
     declare_double("side_balance_lon_max", side_config_.lon_max);
@@ -387,6 +394,16 @@ bool LocalizationApp::RunLocalization() {
     }
     RCLCPP_INFO(node_->get_logger(), "Loaded %zu IMU samples.", imu.size());
 
+    GnssPrior gnss;
+    if (gnss_config_.enabled) {
+        if (!gnss.LoadFromBag(bag_path_, gnss_topic_, error)) {
+            RCLCPP_ERROR(node_->get_logger(), "%s", error.c_str());
+            return false;
+        }
+        RCLCPP_INFO(node_->get_logger(), "Loaded %zu GNSS samples (xy %d, yaw %d, sigma %.2f m / %.1f deg).", gnss.size(),
+                    gnss_config_.use_xy, gnss_config_.use_yaw, gnss_config_.sigma_xy, gnss_config_.sigma_yaw_deg);
+    }
+
     MapManager map_manager(map_cloud_, map_config_);
     NdtMatcher matcher(ndt_config_);
     StateEstimator estimator(estimator_config_);
@@ -600,6 +617,24 @@ bool LocalizationApp::RunLocalization() {
         const Eigen::Matrix4f measured = result.measured;
         if (converged && !first) inflation_sum += info.inflation;
         if (result.stationary) ++stationary_frames;
+        int gnss_xy_applied = 0, gnss_yaw_applied = 0;
+        if (gnss_config_.enabled) {
+            GnssSample g;
+            if (gnss.Next(frame.timestamp_ns, gnss_config_.max_age_ms, g) && !first && !yaw_bank_.active) {
+                const double age = static_cast<double>(frame.timestamp_ns - g.timestamp_ns) * 1e-9;
+                if (gnss_config_.use_xy) {
+                    // 樣本比影格舊 age 秒：以濾波器速度與航向外推到影格時間，σ 再加上外推的不確定度
+                    const double v = estimator.speed(), psi = estimator.yaw();
+                    const double sigma = std::sqrt(gnss_config_.sigma_xy * gnss_config_.sigma_xy + std::pow(0.3 * v * age, 2));
+                    estimator.UpdatePosition(g.x + v * age * std::cos(psi), g.y + v * age * std::sin(psi), sigma);
+                    gnss_xy_applied = 1;
+                }
+                if (gnss_config_.use_yaw) {
+                    estimator.UpdateHeading(StateEstimator::WrapAngle(g.yaw - estimator.yaw()), gnss_config_.sigma_yaw_deg * M_PI / 180.0);
+                    gnss_yaw_applied = 1;
+                }
+            }
+        }
         double trail_delta_deg = std::nan("");
         int trail_applied = 0;
         if (trail_config_.enabled && !yaw_bank_.active && !first && converged && trail_config_.period_frames > 0 &&
@@ -651,7 +686,7 @@ bool LocalizationApp::RunLocalization() {
         diag_file_ << ',' << sigma_lon << ',' << sigma_lat << ',' << sigma_yaw << ',' << result.spread_lon << ',' << result.n_eff << ',' << shown.accel_bias();
         const auto yaw_of = [](const Eigen::Matrix4f& T) { return std::atan2(T(1, 0), T(0, 0)); };
         diag_file_ << ',' << guess_out(0, 3) << ',' << guess_out(1, 3) << ',' << yaw_of(guess_out) << ',' << measured(0, 3) << ','
-                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << trail_delta_deg << ',' << trail_applied << ',' << result.side_share << ',' << result.side_active << '\n';
+                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << trail_delta_deg << ',' << trail_applied << ',' << result.side_share << ',' << result.side_active << ',' << gnss_xy_applied << ',' << gnss_yaw_applied << '\n';
         ++processed;
         rclcpp::spin_some(node_);
 

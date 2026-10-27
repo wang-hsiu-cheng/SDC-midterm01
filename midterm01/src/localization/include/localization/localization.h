@@ -25,6 +25,7 @@
 #include "localization/imu_processor.h"
 #include "localization/initial_pose_search.h"
 #include "localization/road_heading_prior.h"
+#include "localization/gnss_prior.h"
 #include "localization/side_balance.h"
 #include "localization/trail_heading.h"
 #include "localization/map_manager.h"
@@ -109,6 +110,16 @@ private:
     MapManager::Config map_config_;
     NdtMatcher::Config ndt_config_;
     InitialPoseSearch::Config init_search_config_;
+    // GNSS 先驗（助教許可 Track1／2 在演算法內使用；使用者回報）：預設關閉，只在 yaml／-p 啟用，Track3 的 bag 沒有 GNSS
+    struct GnssConfig {
+        bool enabled = false;
+        bool use_xy = true;
+        bool use_yaw = true;
+        double sigma_xy = 0.7;        // m
+        double sigma_yaw_deg = 2.0;
+        double max_age_ms = 600.0;    // 樣本比影格時間舊超過這麼多就丟棄
+    } gnss_config_;
+    std::string gnss_topic_ = "/localizer_node/gnss_pose";
     SideBalance::Config side_config_;    // 前方左側結構比例高時替 yaw 量測加額外標準差（預設關閉）
     TrailHeading::Config trail_config_;  // 地圖軌跡線方向當航向量測（預設關閉）
     RoadHeadingPrior::Config road_heading_config_;  // 第 0 幀以地圖牆面方向修正 init_guess 的 yaw（預設關閉）

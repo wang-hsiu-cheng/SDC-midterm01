@@ -10,6 +10,7 @@
     input_voxel_leaf_size: 0.5
     min_input_points: 10
     ply_scale: 7.5               # Track1 為 8.5，見檔頭說明
+    ply_aniso_x: 1.0              # 前向（x）額外乘的倍率（1 = 不修正）；點雲前向／橫向尺度比不一致時用
     input_max_range: 30.0         # m（水平距離），0 = 不限；⚠ 20 會發散（Track1），勿再調小
 
     # 子地圖（只在車輛移動超過 recrop 距離時重切）

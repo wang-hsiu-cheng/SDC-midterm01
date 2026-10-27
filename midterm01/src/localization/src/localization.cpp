@@ -102,6 +102,7 @@ bool LocalizationApp::LoadParameters() {
     declare_double("input_voxel_leaf_size", input_voxel_leaf_size_);
     declare_int("min_input_points", min_input_points_);
     declare_double("ply_scale", ply_scale_);
+    declare_double("ply_aniso_x", ply_aniso_x_);
     declare_double("input_max_range", input_max_range_);
 
     declare_double("submap_half_size", map_config_.half_size);
@@ -295,8 +296,9 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr LocalizationApp::ScalePlyPointCloud(const pc
     auto scaled = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
     scaled->points.reserve(input->size());
     const float factor = static_cast<float>(scale);
+    const float factor_x = static_cast<float>(scale * ply_aniso_x_);
     for (const auto& point : input->points) {
-        scaled->points.emplace_back(factor * point.x, factor * point.y, factor * point.z);
+        scaled->points.emplace_back(factor_x * point.x, factor * point.y, factor * point.z);
     }
     scaled->width = static_cast<std::uint32_t>(scaled->size());
     scaled->height = 1;
@@ -308,9 +310,10 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr LocalizationApp::ScalePlyColorCloud(const
     auto scaled = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
     scaled->points.reserve(input->size());
     const float factor = static_cast<float>(scale);
+    const float factor_x = static_cast<float>(scale * ply_aniso_x_);
     for (const auto& point : input->points) {
         pcl::PointXYZRGB output = point;
-        output.x = factor * point.x;
+        output.x = factor_x * point.x;
         output.y = factor * point.y;
         output.z = factor * point.z;
         scaled->points.push_back(output);

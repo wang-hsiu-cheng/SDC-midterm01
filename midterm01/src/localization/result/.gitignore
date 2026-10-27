@@ -1,0 +1,5 @@
+# run 輸出不進 git：只追蹤正式提交版（Track*_result.txt）與 Kaggle csv（result_*.csv）
+*
+!.gitignore
+!Track[123]_result.txt
+!result_[123].csv

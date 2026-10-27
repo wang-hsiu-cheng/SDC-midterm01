@@ -109,7 +109,7 @@
 | T3 | **`bt1`（現行）** | `ba2`＋TrailHeading | — | **1.87**（距 baseline 1.29 差 0.58） |
 
 ### 結果檔與 yaml 的對應（提交前必須處理）
-- **Track1／Track2：官方結果＝GNSS 先驗 xy＋yaw 版（`gb`／`g2b`；分支 `feature/gnss-prior`）**：`Track1_result.txt`／`result_1.csv`（Kaggle public 1.13）、`Track2_result.txt`／`result_2.csv`（Kaggle public 0.77）；yaml 已啟用 `gnss_prior_enabled: true`（σxy 0.7 m、σyaw 2°）。官方文件明文允許使用 GNSS（使用者說明；先前「不用 GNSS」是使用者與 Claude 自訂的目標，不是競賽規則，CLAUDE.md 規則 4 已更新）。yaml 與 `-p` 覆寫等價：純 yaml 前 600 幀（`vy1`／`vy2`）與 `gb`／`g2b` 前 600 行逐位元相同（全長未重跑）。`result_1.csv`／`result_2.csv` 與先前提交的 `result_1_gnss_both.csv`／`result_2_gnss_both.csv` 位元組相同。無 GNSS 版 `rhp1s4`／`rhp2` 在 `worktree-diag-final-fitness` 分支與 result 目錄仍可取得。Track3 維持 `bt1`（bag 沒有 GNSS）。
+- **Track1／Track2：官方結果＝GNSS 先驗 xy＋yaw 版（`gb`／`g2b`；分支 `feature/gnss-prior`）**：`Track1_result.txt`／`result_1.csv`（Kaggle public 1.13）、`Track2_result.txt`／`result_2.csv`（Kaggle public 0.77）；yaml 已啟用 `gnss_prior_enabled: true`（σxy 0.7 m、σyaw 2°）。官方文件明文允許使用 GNSS（使用者說明；先前「不用 GNSS」是使用者與 Claude 自訂的目標，不是競賽規則，CLAUDE.md 規則 4 已更新）。yaml 與 `-p` 覆寫等價：純 yaml 前 600 幀（`vy1`／`vy2`）與 `gb`／`g2b` 前 600 行逐位元相同（全長未重跑）。`result_1.csv`／`result_2.csv` 與先前提交的 `result_1_gnss_both.csv`／`result_2_gnss_both.csv` 位元組相同。無 GNSS 版 `rhp1s4`／`rhp2` 已移出 git 追蹤（`result/.gitignore` 只追蹤 `Track*_result.txt` 與 `result_*.csv`），仍在 worktree 磁碟與 git 歷史（`69b810c`）可取得，也可由 `-p gnss_prior_enabled:=false` 重跑。Track3 維持 `bt1`（bag 沒有 GNSS）。
 - **Track3：官方結果＝`bt1`**（`process_sigma_accel_bias` 0.002＋`trail_heading_enabled: true`，Kaggle public 1.87）：`Track3_result.txt`／`result_3.csv`；Track3 預設 yaml 全長 run（`gOff3`）與 `bt1` 逐位元相同（可由 yaml 重現）。
 - master 工作區的 `build/`、`install/` 常是舊的（git 不會更新它們）：在 master 跑之前先 `colcon build`。
 

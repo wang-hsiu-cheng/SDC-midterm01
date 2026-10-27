@@ -137,7 +137,7 @@ launch 參數：`data_path`、`bag_path`、`ply_path`、`init_guess_file`、`sav
 18. **改動不能影響其他 track**：為某個 track 做的改動，預設對其他 track 關閉（參數預設 0／false，只在該 track 的 yaml 開），並用逐位元比對（`cmp` 已提交的結果檔）證明其他 track 沒變。不確定會不會影響時先說，不要賭。
 19. **違反競賽規則的做法**（規則 1、2、3、5、6）：只在使用者明確要求、並已說明衝突後才考慮，不為了完成任務自己放寬規則。GNSS 先驗屬官方允許（見規則 4），可直接使用，但仍須 causal，並維持預設關閉、逐 track 以 yaml 啟用、關閉時位元不變的作法。
 20. **回答用中文、先講結論**：先給結果／答案，再講依據；表格與數字要對得上實際輸出，不寫沒驗證過的說法。
-21. **提交時逐一指定檔案，不要 `git add` 整個目錄**：`result/` 內的 run 輸出（`.txt`、`.diag.csv`、`.manifest.txt`）數量大，不進 git；只追蹤官方結果（`Track1/2/3_result.txt`、`result_1/2/3.csv`）與少數有 Kaggle 對照價值的基準檔。
+21. **提交時逐一指定檔案，不要 `git add` 整個目錄**：`result/` 內的 run 輸出（`.txt`、`.diag.csv`、`.manifest.txt`）數量大，不進 git；只追蹤正式提交版 `Track1/2/3_result.txt` 與 Kaggle 用的 `result_1/2/3.csv`（`result/.gitignore` 已設定，其餘一律忽略）；基準版與其他 run 的 txt 只留在磁碟，需要時從 git 歷史或重跑取得。
 
 ---
 

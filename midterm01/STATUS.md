@@ -29,6 +29,11 @@
 | T3 | A＋E（`6e289ca`） | — | 2.01 | |
 | T3 | A＋E＋hold＋floor 0.6（H2，`f81f508`） | — | **1.93** | 距 baseline 1.29 仍差 0.64 |
 | T2 | 收斂版，floor 0（`mg2nofloor`） | 2.2773 | 未提交 | `result_2.csv` 已提交；先前全部設定發散（E 218–670） |
+| T2 | 牆面方向先驗＋σ_yaw=4（`rhp2`，`5d73bca`；現行正式結果） | 1.7513（rmse_p 1.169、yaw 2.91°） | **1.46**（使用者回報，已過 baseline 1.92） | `Track2_result.txt`／`result_2.csv` 為此版（`edcd591`）；未確認 1.46 是否為此版，待使用者確認 |
+| T3 | `zb0`（A＋E＋hold，floor 0；現行官方 `Track3_result.txt`） | — | 2.01 | 比 H2 差 0.08 |
+| T3 | `ba2`（`process_sigma_accel_bias` 0.002） | — | 2.01 | public 只評前段，`ba` 差異在 2100 幀後 |
+| T3 | `ba05`（`process_sigma_accel_bias` 0.0005） | — | 2.02 | 同上 |
+| T3 | **`bt1`（`ba2`＋軌跡線航向量測 `trail_heading_enabled`，`8ce81bf`；`-p` 覆寫產生，yaml 尚未更新）** | — | **1.87**（使用者回報） | 距 baseline 1.29 差 0.58；軌跡線在 0–900 幀套用 179 幀，動到 public 區段 |
 
 ### 結果檔與 yaml 的對應（提交前必須處理）
 - **Track1／Track2：官方結果已換成 `rhp1s4`／`rhp2`**（牆面方向先驗＋σ_yaw=4，見 §4-17；Track1 先驗關，本地 E 1.758；Track2 先驗開，E 1.751）。**Track3：`Track3_result.txt`／`result_3.csv` 仍是 floor 0.6 時期的版本**，與目前 yaml（floor 0）不符（規則 6），提交前要重新產生（候選 `zb0`）。

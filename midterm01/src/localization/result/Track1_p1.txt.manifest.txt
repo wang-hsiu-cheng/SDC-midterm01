@@ -1,0 +1,24 @@
+date: 2026-10-26T16:34:17+08:00
+track: Track1
+tag: p1
+workspace: /home/wangt/SDC-midterm01/.claude/worktrees/diag-final-fitness/midterm01
+git_commit: 5bee1bc786a7641ae185427c2fa4c0abd9d29da7
+git_dirty: yes（結果不是由單一 commit 重現，以下為未提交修改）
+   M midterm01/src/localization/CMakeLists.txt
+   M midterm01/src/localization/config/localization_params_Track1.yaml
+   M midterm01/src/localization/config/localization_params_Track2.yaml
+   M midterm01/src/localization/config/localization_params_Track3.yaml
+   M midterm01/src/localization/include/localization/initial_pose_search.h
+   M midterm01/src/localization/include/localization/localization.h
+   D midterm01/src/localization/include/localization/scale_estimator.h
+   M midterm01/src/localization/include/localization/state_estimator.h
+   M midterm01/src/localization/src/initial_pose_search.cpp
+   M midterm01/src/localization/src/localization.cpp
+   D midterm01/src/localization/src/scale_estimator.cpp
+   M midterm01/src/localization/src/state_estimator.cpp
+   M midterm01/src/localization/tools/analyze_diag.py
+params_file: src/localization/config/localization_params_Track1.yaml
+params_sha256: 2aee5eac0bb29495a0718ea6654c3163ddec1f6d0059a20f0ec8e96b5bf20311
+overrides: （無）
+image: sdc_ros2_dev:latest sha256:e81dbd12746eea416f2edd741db208904b7bebee3ac07e6753a0ec5357ad525f
+cpus: unlimited

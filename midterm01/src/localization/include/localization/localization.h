@@ -101,7 +101,6 @@ private:
     double input_voxel_leaf_size_ = 0.5;
     int min_input_points_ = 10;
     double ply_scale_ = 8.0;
-    double ply_aniso_x_ = 1.0;  // 前向（x）額外乘的倍率：點雲前向尺度與橫向尺度的比例不一致時的修正（1 = 不修正）
 
     // 前處理：影像點雲的深度誤差隨距離快速放大；0 = 不限。Track1 實測 20 m 會發散、30 m 小幅改善
     double input_max_range_ = 0.0;  // m，水平距離

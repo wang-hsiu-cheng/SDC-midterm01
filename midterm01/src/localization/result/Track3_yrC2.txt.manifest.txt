@@ -1,0 +1,17 @@
+date: 2026-10-26T23:56:47+08:00
+track: Track3
+tag: yrC2
+workspace: /home/wangt/SDC-midterm01/.claude/worktrees/diag-final-fitness/midterm01
+git_commit: ac3777d32e3c7787f30b0aa675de4cabaa8e77f5
+git_dirty: yes（結果不是由單一 commit 重現，以下為未提交修改）
+   M midterm01/src/localization/config/localization_params_Track1.yaml
+   M midterm01/src/localization/config/localization_params_Track2.yaml
+   M midterm01/src/localization/config/localization_params_Track3.yaml
+   M midterm01/src/localization/include/localization/state_estimator.h
+   M midterm01/src/localization/src/localization.cpp
+   M midterm01/src/localization/src/state_estimator.cpp
+params_file: src/localization/config/localization_params_Track3.yaml
+params_sha256: fbe093fd5eac5483fbf18225f1d1f79314efc469d31777d3eb1818d1c0eda95a
+overrides: -p max_frames:=2700 -p yaw_release_frames:=300 -p yaw_release_var_scale:=100.0
+image: sdc_ros2_dev:latest sha256:e81dbd12746eea416f2edd741db208904b7bebee3ac07e6753a0ec5357ad525f
+cpus: unlimited

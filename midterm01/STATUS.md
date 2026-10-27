@@ -42,7 +42,7 @@
 | T3 | **`bt1`（`ba2`＋軌跡線航向量測 `trail_heading_enabled`，`8ce81bf`；`-p` 覆寫產生，yaml 尚未更新）** | — | **1.87**（使用者回報） | 距 baseline 1.29 差 0.58；軌跡線在 0–900 幀套用 179 幀，動到 public 區段 |
 
 ### 結果檔與 yaml 的對應（提交前必須處理）
-- **Track1／Track2：官方結果已換成 `rhp1s4`／`rhp2`**（牆面方向先驗＋σ_yaw=4，見 §4-17；Track1 先驗關，本地 E 1.758；Track2 先驗開，E 1.751）。**Track3：`Track3_result.txt`／`result_3.csv` 仍是 floor 0.6 時期的版本**，與目前 yaml（floor 0）不符（規則 6），提交前要重新產生（候選 `zb0`）。
+- **Track1／Track2：官方結果＝GNSS 先驗 xy＋yaw 版（`gb`／`g2b`；分支 `feature/gnss-prior`）**：`Track1_result.txt`／`result_1.csv`（Kaggle public 1.13）、`Track2_result.txt`／`result_2.csv`（Kaggle public 0.77）；yaml 已啟用 `gnss_prior_enabled: true`（σxy 0.7 m、σyaw 2°）。助教許可 Track1／2 使用 GNSS 先驗（使用者口頭回報，請留存證據；規則 4 的例外）。yaml 與 `-p` 覆寫等價：純 yaml 前 600 幀（`vy1`／`vy2`）與 `gb`／`g2b` 前 600 行逐位元相同（全長未重跑）。`result_1.csv`／`result_2.csv` 與先前提交的 `result_1_gnss_both.csv`／`result_2_gnss_both.csv` 位元組相同。無 GNSS 版 `rhp1s4`／`rhp2` 在 `worktree-diag-final-fitness` 分支與 result 目錄仍可取得。Track3 維持 `bt1`（bag 沒有 GNSS）。
 - Track3 候選：`zb0`（floor 0、hold 開，純 yaml，只在 worktree 的未追蹤結果裡）。Track2 純 yaml 版尚未重跑驗證逐位元相同（現有的是 `-p` 覆寫的 `mg2nofloor`）。
 - master 工作區的 `build/`、`install/` 常是舊的（git 不會更新它們）：在 master 跑之前先 `colcon build`。
 

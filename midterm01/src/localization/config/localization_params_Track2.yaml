@@ -26,7 +26,7 @@
 
     # GNSS 先驗（助教許可 Track1／2 在演算法內使用，使用者回報；規則 4 的例外，僅此開關）：預設關閉。
     # use_xy／use_yaw 分別決定用位置或航向；Track3 的 bag 沒有 GNSS，不要開
-    gnss_prior_enabled: false
+    gnss_prior_enabled: true      # Track2 啟用（xy＋yaw；Kaggle public：見 STATUS §2、§4-31／32）
     gnss_prior_use_xy: true
     gnss_prior_use_yaw: true
     gnss_prior_sigma_xy: 0.7

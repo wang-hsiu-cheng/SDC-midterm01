@@ -85,7 +85,7 @@
 | 14 | 地圖軌跡線航向量測（`TrailHeading`） | 取位姿高度 ±0.5 m、前後 12 m 的圖層點做 PCA 線擬合，線方向當 yaw 量測（σ 1.5°，每 3 幀，靜止不量） | – | – | ✓ | T3 紅燈結束的突然偏轉 +4.1°→+0.5°（§4-23、§4-25） |
 | 15 | GNSS 先驗（`GnssPrior`，xy＋yaw） | 讀 bag 的 GNSS，位置外推到影格時間，σxy 0.7 m、σyaw 2°，每筆用一次（causal） | ✓ | ✓ | –（bag 沒有 GNSS） | Kaggle T1 `rhp1s4` 1.52→1.13（−0.39）、T2 `rhp2` 1.46→0.77（−0.69）（§4-31／32） |
 
-已實作但**預設關閉、未採用**：`SideBalance`（左右不平衡降權，§4-30）。已**移除**的失敗旋鈕：floor／自適應 floor、信心縮放、線上尺度估計 v1、yaw 多起點、`ply_aniso_x`、累積多幀點雲、G-ICP 等（見 §5）。
+已實作但**預設關閉、未採用**：`SideBalance`（左右不平衡降權，§4-30）、`GroundHeightPrior`（地圖路面約束位姿 z，§4-35，使用者目視否決）、`TrailHeading` 的 `yaw_only`／`when_stationary`（`b3`，過修，§4-34）與 `ground_relative`（§4-34，無明確好處）。已**移除**的失敗旋鈕：floor／自適應 floor、信心縮放、線上尺度估計 v1、yaw 多起點、`ply_aniso_x`、累積多幀點雲、G-ICP 等（見 §5）。
 
 #### 完整 Kaggle 對照表（依 track 與時間排序）
 | Track | 版本 | 相對父版本新增 | 本地 E（GNSS） | Kaggle public |
@@ -136,6 +136,7 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 | `TrailHeading` | 地圖軌跡線（相機高度的細長點雲線）的方向當 yaw 量測（σ 2°）；僅 Track3 開 |
 | `GnssPrior` | 讀 bag 的 GNSS，xy／yaw 各自可開，causal；Track1／2 開，Track3 的 bag 沒有 GNSS |
 | `SideBalance` | 左側結構比例高時替 yaw 量測加額外 σ（§4-30）；已實作、預設關閉、不採用 |
+| `GroundHeightPrior` | 以地圖路面（位姿 xy 周圍 4 m 的 20% 分位）＋相機高度約束位姿 z（§4-35）；已實作、預設關閉、不採用 |
 
 三份 yaml 的差異（`tools/diff_params.py`；floor、信心縮放、線上尺度估計等失敗的實驗旋鈕已全部移除，見 §5）：`ply_scale` 8.5／8.7／7.5；Track1 `init_search_xy_offsets: [0.0]`；Track2：關第 0 幀搜尋、釘住 beta（`init_sigma_beta_deg` 0.01、`process_sigma_beta` 1e-6）、`process_sigma_accel_bias` 0.002、ba 偽量測（`zupt_sigma_accel_bias` 0.01、`zupt_accel_mean_max` 0.08）、`yaw_bank_*` 開。floor 三個 track 都是 0。
 
@@ -249,7 +250,7 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
    - 位姿 z−地圖地面：`p5` 停等 1.32～1.33 m、轉彎後 2.31～2.36 m；`z1`（gain 0.5）停等 1.85、轉彎後 2.04～2.09（3100 幀 1.85）；`z2`（gain 1.0）全程 1.82～1.92。
    - **public 區段（到 1257 幀）幾乎不變**：位置差 ≤0.1 m、輸出−IMU 偏差差 ≤0.2° → Kaggle public 看不出。**轉彎段變化大**：2700 幀橫向相對 `p5` `z1` −3.1 m、`z2` −5.0 m（負＝右，與使用者先前目視「轉彎後整體偏左約 3 m」同向）；2850 幀縱向 +2.6／+3.3 m；2300→終點路徑 117.6／117.9 m（`p5` 110.4）；速度峰值 7.04／7.08 m/s（`p5` 6.68）；終點位置差約 1 m。軌跡線套用 511／529 幀（`p5` 494；2450–2900 幀 68／86 vs 116）。
    - **代價**：平均 `final_fitness` 0.2533→0.3366（`z1`）／0.3450（`z2`）。NDT 偏好的 z 不是路面＋1.85：停等時 NDT 要路面＋1.33 m（點雲尺度縮小，地面離相機近）、行駛約 1.71；相機真實高度可能約 1.7。
-   - 待使用者目視 `Track3_z1.txt`／`Track3_z2.txt` 與 `p5` 的轉彎段；方向對的話，下一步用較低高度（約 1.7）與較小 gain（0.2）降低對 fitness 的傷害。
+   - **使用者目視結論（10/28）：`z1`／`z2` 都太晚左轉，轉彎後偏右且很晚才校正，轉彎後直行段相機點雲的地面前傾 → 不採用，維持 `p5`。** 解讀（推論）：只約束 z 不夠，z 被拉回路面後，位姿 pitch 仍偏鼻朝下（轉彎後對地面坡度 +2.7～+3.4°），點雲地面前傾；若要繼續，需同時用地圖路面平面約束 pitch／roll，並降低相機高度與 gain，但 fitness 已大幅變差，不建議在結案前再投入。
 
 ## 5. 失敗嘗試與設計決策（報告用）
 
@@ -286,15 +287,16 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 
 **P1 Track3 還能研究的方向（距 baseline 1.29 差 0.58；public 只評約 157–1257 幀，轉彎〔約 2400–2800 幀〕在 private，無法用 Kaggle 驗證，只能靠使用者目視）**
 依「預期收益／成本」排序。除註明外都是只改 yaml、全長 Track3 一個 run 即可驗證，可平行跑；每個都要先確認 Track1／2 位元不變（只動 Track3 的 yaml 時自動成立）。
-1. **`meas_sigma_yaw_deg` 2→4（yaml）**：Track1 的 `yb1`→`rhp1s4`（唯一差異就是 σ_yaw 4）Kaggle 1.62→1.52（−0.10），Track2 本地 E −0.08（§4-16）。Track3 尚未試，且會動到 public 區段。**最高優先。**
-2. **釘住 beta（yaml）**：`init_sigma_beta_deg` 0.01、`process_sigma_beta` 1e-6（Track2 的設定）。Track3 的 beta 在轉彎後掉到 −3～−6° 不回（§4-18），釘住可能減少轉彎後橫向漂移。
-3. **`ba` 偽量測（yaml）**：`zupt_sigma_accel_bias` 0.01＋`zupt_accel_mean_max` 0.08（Track2 的設定）。停等時 `ba` 穩定在 +0.008，行駛時擺動 ±0.06（§4-24）；可讓停等後的 `ba` 起點更穩，並抑制轉彎速度過衝（峰值 6.4～6.6 m/s）。
-4. **加強軌跡線量測（yaml）**：`trail_heading_sigma_deg` 2→1、`trail_heading_period_frames` 5→3、`trail_heading_gate_deg` 12→15。目前只套用 306／3142 幀。
+1. **（已完成，採用；Kaggle 1.87→1.85，§4-33）`meas_sigma_yaw_deg` 2→4（yaml）**：Track1 的 `yb1`→`rhp1s4`（唯一差異就是 σ_yaw 4）Kaggle 1.62→1.52（−0.10），Track2 本地 E −0.08（§4-16）。Track3 尚未試，且會動到 public 區段。**最高優先。**
+2. **（已做，無變化，不採用，§4-33）釘住 beta（yaml）**：`init_sigma_beta_deg` 0.01、`process_sigma_beta` 1e-6（Track2 的設定）。Track3 的 beta 在轉彎後掉到 −3～−6° 不回（§4-18），釘住可能減少轉彎後橫向漂移。
+3. **（已做，速度過衝，不採用，§4-33）`ba` 偽量測（yaml）**：`zupt_sigma_accel_bias` 0.01＋`zupt_accel_mean_max` 0.08（Track2 的設定）。停等時 `ba` 穩定在 +0.008，行駛時擺動 ±0.06（§4-24）；可讓停等後的 `ba` 起點更穩，並抑制轉彎速度過衝（峰值 6.4～6.6 m/s）。
+4. **（已完成，溫和版 σ 1.5°／每 3 幀＋σ_yaw 4＝`p5` 採用，Kaggle 1.74，§4-33、§4-34）加強軌跡線量測（yaml）**：`trail_heading_sigma_deg` 2→1、`trail_heading_period_frames` 5→3、`trail_heading_gate_deg` 12→15。目前只套用 306／3142 幀。
 5. **（已完成，§4-34）查 `bt2` 異常並修正（程式，中成本）**：`trail_heading_when_stationary: true` 時紅燈位置輸出−IMU 姿態 +3.8°→−1.1°（幾乎消除 +5° 殘餘，是 public 區段最大的剩餘誤差），但全長路徑少 25 m（§4-25）。原因未查；若釐清並限制（例如只在停等前段量測、限制單次修正量），可能直接解掉 700–1000 幀的偏差。
 6. **（已做，負面，§4-34）軌跡線在轉彎段可用（程式，中成本，private 區段）**：高度帶改成相對地面（位姿 z 在轉彎中由 5.6 漂到 6.4 m，2450–2750 幀圖層點為 0）、必要時改曲線擬合；目前轉彎段只套用 11 幀。
-7. **NDT yaw 量測偏差估計（程式，高成本／高風險）**：以軌跡線方向為參考，估計 NDT yaw 量測相對它的緩變偏差（量測偏差狀態），從 NDT yaw 量測中扣除；針對根因（左側結構把 NDT yaw 往逆時針拉約 +4～6°，§4-19、§4-29）。
+7. **（未做）NDT yaw 量測偏差估計（程式，高成本／高風險）**：以軌跡線方向為參考，估計 NDT yaw 量測相對它的緩變偏差（量測偏差狀態），從 NDT yaw 量測中扣除；針對根因（左側結構把 NDT yaw 往逆時針拉約 +4～6°，§4-19、§4-29）。
 8. **依左右分離選用 yaw 量測（程式，中成本，證據混合）**：紅燈位置右半 NDT yaw 偏差 +1～2°、左半 +5～6°；改成選用較準的一側而非降權。先前「選 fitness 較低的一半」在 8 個設定中 4 個比全部點好、4 個比全部點差，轉彎段兩個設定都較差（§4-19 末項），風險高。
 9. **轉彎縱向（private，低證據）**：速度過衝上限／非完整約束；沒有資料顯示縱向誤差來源，不優先。
+10. **（已做，使用者目視否決，§4-35）用地圖路面約束位姿 z**：轉彎太晚、轉彎後偏右且晚校正、點雲地面前傾；維持 `p5`。
 
 不建議（已有負面證據）：多相機點雲（Track1 無準度優勢，§4-21／22）、距離相關深度校正與各向異性尺度（§4-27／28）、視覺慣性式尺度估計（尺度行駛段穩定，§4-8）、停等時降權 yaw／牆面方向再錨定（§4-30、§4-19）、起步後降權 yaw 量測（§4-18 (C)）。
 

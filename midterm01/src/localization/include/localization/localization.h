@@ -26,6 +26,7 @@
 #include "localization/initial_pose_search.h"
 #include "localization/road_heading_prior.h"
 #include "localization/gnss_prior.h"
+#include "localization/ground_height_prior.h"
 #include "localization/side_balance.h"
 #include "localization/trail_heading.h"
 #include "localization/map_manager.h"
@@ -120,6 +121,7 @@ private:
         double max_age_ms = 600.0;    // 樣本比影格時間舊超過這麼多就丟棄
     } gnss_config_;
     std::string gnss_topic_ = "/localizer_node/gnss_pose";
+    GroundHeightPrior::Config ground_config_;  // 用地圖路面約束位姿 z（預設關閉）
     SideBalance::Config side_config_;    // 前方左側結構比例高時替 yaw 量測加額外標準差（預設關閉）
     TrailHeading::Config trail_config_;  // 地圖軌跡線方向當航向量測（預設關閉）
     RoadHeadingPrior::Config road_heading_config_;  // 第 0 幀以地圖牆面方向修正 init_guess 的 yaw（預設關閉）

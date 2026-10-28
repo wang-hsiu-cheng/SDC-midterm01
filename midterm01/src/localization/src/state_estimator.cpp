@@ -99,6 +99,10 @@ void StateEstimator::UpdateStationary(double yaw_rate_mean, double forward_accel
     state_(3) = std::clamp(state_(3), 0.0, config_.max_speed);
 }
 
+void StateEstimator::PullHeight(double target_z, double gain) {
+    pose_(2, 3) += static_cast<float>(gain * (target_z - pose_(2, 3)));
+}
+
 void StateEstimator::UpdatePosition(double x, double y, double sigma) {
     const double yaw_before = state_(2);
     Eigen::Matrix<double, 2, kStateSize> H = Eigen::Matrix<double, 2, kStateSize>::Zero();

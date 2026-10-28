@@ -32,6 +32,7 @@ add_definitions(${PCL_DEFINITIONS})
 
 add_library(localization_core
   src/gnss_prior.cpp
+  src/ground_height_prior.cpp
   src/imu_processor.cpp
   src/initial_pose_search.cpp
   src/map_manager.cpp

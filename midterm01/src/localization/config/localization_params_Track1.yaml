@@ -30,6 +30,14 @@
     gnss_prior_sigma_xy: 0.7
     gnss_prior_sigma_yaw_deg: 2.0
     gnss_prior_max_age_ms: 600.0
+    # 用地圖路面約束位姿 z：z_target = 位姿 xy 周圍的地圖路面 + 相機高度（只用地圖）。預設關閉
+    ground_prior_enabled: false
+    ground_prior_camera_height: 1.85
+    ground_prior_radius: 4.0
+    ground_prior_z_low: -4.0
+    ground_prior_z_high: -0.5
+    ground_prior_min_points: 20
+    ground_prior_gain: 0.5
     # 前方左側垂直結構比例 L/(L+R) 高時，替 yaw 量測加額外標準差，讓陀螺儀與軌跡線主導航向（只用地圖）
     side_balance_enabled: false
     side_balance_left_share_min: 0.45

@@ -38,7 +38,7 @@ int LocalizationApp::Start(int argc, char** argv) {
         return -1;
     }
     diag_file_.open(output_path.string() + ".diag.csv");
-    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,trail_delta_deg,trail_applied,side_share,side_active,gnss_xy_applied,gnss_yaw_applied\n";
+    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,trail_delta_deg,trail_applied,side_share,side_active,gnss_xy_applied,gnss_yaw_applied,ground_z\n";
 
     if (yaw_bank_enabled_) {
         bank_file_.open(output_path.string() + ".bank.csv");
@@ -120,6 +120,13 @@ bool LocalizationApp::LoadParameters() {
     declare_double("gnss_prior_sigma_yaw_deg", gnss_config_.sigma_yaw_deg);
     declare_double("gnss_prior_max_age_ms", gnss_config_.max_age_ms);
     declare_string("gnss_topic", gnss_topic_);
+    declare_bool("ground_prior_enabled", ground_config_.enabled);
+    declare_double("ground_prior_camera_height", ground_config_.camera_height);
+    declare_double("ground_prior_radius", ground_config_.radius);
+    declare_double("ground_prior_z_low", ground_config_.z_low);
+    declare_double("ground_prior_z_high", ground_config_.z_high);
+    declare_int("ground_prior_min_points", ground_config_.min_points);
+    declare_double("ground_prior_gain", ground_config_.gain);
     declare_bool("side_balance_enabled", side_config_.enabled);
     declare_double("side_balance_left_share_min", side_config_.left_share_min);
     declare_double("side_balance_lon_max", side_config_.lon_max);
@@ -641,6 +648,14 @@ bool LocalizationApp::RunLocalization() {
                 }
             }
         }
+        double ground_z_diag = std::nan("");
+        if (ground_config_.enabled && !yaw_bank_.active && !first && !map_manager.submap()->empty()) {
+            const auto ground = GroundHeightPrior(ground_config_).Estimate(*map_manager.submap(), estimator.pose());
+            if (ground.found) {
+                ground_z_diag = ground.ground_z;
+                estimator.PullHeight(ground.target_z, ground_config_.gain);
+            }
+        }
         double trail_delta_deg = std::nan("");
         int trail_applied = 0;
         if (trail_config_.enabled && !yaw_bank_.active && !first && converged && trail_config_.period_frames > 0 &&
@@ -692,7 +707,7 @@ bool LocalizationApp::RunLocalization() {
         diag_file_ << ',' << sigma_lon << ',' << sigma_lat << ',' << sigma_yaw << ',' << result.spread_lon << ',' << result.n_eff << ',' << shown.accel_bias();
         const auto yaw_of = [](const Eigen::Matrix4f& T) { return std::atan2(T(1, 0), T(0, 0)); };
         diag_file_ << ',' << guess_out(0, 3) << ',' << guess_out(1, 3) << ',' << yaw_of(guess_out) << ',' << measured(0, 3) << ','
-                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << trail_delta_deg << ',' << trail_applied << ',' << result.side_share << ',' << result.side_active << ',' << gnss_xy_applied << ',' << gnss_yaw_applied << '\n';
+                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << trail_delta_deg << ',' << trail_applied << ',' << result.side_share << ',' << result.side_active << ',' << gnss_xy_applied << ',' << gnss_yaw_applied << ',' << ground_z_diag << '\n';
         ++processed;
         rclcpp::spin_some(node_);
 

@@ -113,6 +113,7 @@
 | T3 | `p1s4` | `bt1`＋`meas_sigma_yaw_deg` 4 | — | **1.85**（比 `bt1` 好 0.02） |
 | T3 | `b3` | `bt1`＋停等也量測軌跡線（`yaw_only`） | — | 1.92（比 `bt1` 差 0.05） |
 | T3 | **`p5`（現行）** | `bt1`＋σ_yaw 4＋`trail_heading_sigma_deg` 1.5＋`trail_heading_period_frames` 3 | — | **1.74**（比 `bt1` 好 0.13；距 baseline 1.29 差 0.45） |
+| T3 | `l2` | `p5`＋軌跡線橫向推（gain 0.3） | — | 1.84（比 `p5` 差 0.10） |
 
 ### 結果檔與 yaml 的對應（提交前必須處理）
 - **Track1／Track2：官方結果＝GNSS 先驗 xy＋yaw 版（`gb`／`g2b`；分支 `feature/gnss-prior`）**：`Track1_result.txt`／`result_1.csv`（Kaggle public 1.13）、`Track2_result.txt`／`result_2.csv`（Kaggle public 0.77）；yaml 已啟用 `gnss_prior_enabled: true`（σxy 0.7 m、σyaw 2°）。官方文件明文允許使用 GNSS（使用者說明；先前「不用 GNSS」是使用者與 Claude 自訂的目標，不是競賽規則，CLAUDE.md 規則 4 已更新）。yaml 與 `-p` 覆寫等價：純 yaml 前 600 幀（`vy1`／`vy2`）與 `gb`／`g2b` 前 600 行逐位元相同（全長未重跑）。`result_1.csv`／`result_2.csv` 與先前提交的 `result_1_gnss_both.csv`／`result_2_gnss_both.csv` 位元組相同。無 GNSS 版 `rhp1s4`／`rhp2` 已移出 git 追蹤（`result/.gitignore` 只追蹤 `Track*_result.txt` 與 `result_*.csv`），仍在 worktree 磁碟與 git 歷史（`69b810c`）可取得，也可由 `-p gnss_prior_enabled:=false` 重跑。Track3 維持 `bt1`（bag 沒有 GNSS）。
@@ -255,6 +256,9 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
    - **Track1（無 GNSS）發散**：`ta1`（只開軌跡線航向）E 1.7434；`tb1`（＋橫向推 gain 0.15）E **37.37**（lon 落後 −1.85 m〔100 幀〕→−21 m〔800 幀〕）。原因：橫向推造成的位置差經交叉協方差變成 `beta` −1.5～−2.9°（`ta1` +0.7°）、`ba` +0.03～+0.04（`ta1` ≈0）、速度被拉低約 1 m/s（300 幀 6.0 vs 7.1 m/s）；低速（~2 m/s）時軌跡線橫向量測符號翻轉（前 75 幀 −0.41→+1.11 m，GNSS 顯示當時車偏左 +1.2 m，軌跡線與 GNSS 差約 1.8 m）。Track2：`ta2` 1.6652→`tb2` 1.6612，橫向 rms 0.46→0.41 m、平均橫向 +0.15→+0.17 m（沒修掉偏差）。
    - **Track3**：`l1`（gain 0.15）在轉彎發散（2700 幀相對 `p5` lon −9.6／lat −6.1 m；直線擬合在彎道的橫向位置不準）；`l2`（gain 0.3）未發散（與 `p5` 差 ≤0.9 m，終點差 0.16 m），public 區段停等位置（900–1257 幀）相對 `p5` 橫向 −0.98～−0.50 m（往右）；平均 `final_fitness` `l1` 0.2700、`l2` 0.2611（`p5` 0.2533）；量到的橫向偏差中位 157–950 幀約 −0.3 m。Kaggle 待使用者（`result_3_l2.csv`）。
    - 結論：固定增益推在目前閘門下不穩定（低速、彎道），不採用；若要繼續需加閘門：速度 >3 m/s、線方向與車頭差 <4°、細長度 <0.12。
+   - **Kaggle public（使用者回報）：`l2` 1.84（`p5` 1.74）→ 把停等位置往右推 0.5～1.0 m 變差 0.10，「Track3 位姿比軌跡線偏左是偏差」的假設被否定**：測試車走的線可能本來就在建圖車軌跡左側約 0.3 m，Track3 的軌跡線橫向位置不能當真值（Track1 吻合 GNSS，Track3 不吻合）；軌跡線**方向**仍可用（`p5`）。使用者目視：`p5` 在 public 段一直在軌跡線左側、對齊左側特徵，且已偏左後右側相機看到的東西仍比 LiDAR 遠。
+   - 牆面量測（高度 1.5～6 m 的點，橫向直方圖由車旁往外第一個 ≥35% 峰值的 bin，0.25 m 解析度，位姿 `p5`，點雲×7.5）：行駛 200–700 幀 左牆（點雲−地圖）+0.25 m、右牆 **+0.50 m**（右側偏遠）、路寬比 1.07；停等 700–1300 幀 左牆 0.00、右牆 −0.50 m、路寬比 0.98（停等時點雲尺度縮小，最不可靠）。單次量測雜訊約 ±0.5 m，只能說方向與使用者目視一致。解讀（推論）：NDT 目標函式由結構多的左側主導，與 §4-19 左側把 yaw 往逆時針拉是同一機制；右側偏遠可能是點雲橫向寬約 5～7% 或位姿仍偏左 0.25～0.5 m，無法分開。
+   - **誤差預算**：public 1.74＝位置 RMSE＋0.2×yaw RMSE，yaw rms 約 2.5° 時位置 RMSE 約 1.2 m；0.3～0.5 m 的橫向偏差只貢獻約 0.04～0.1 m → 橫向不是 public 剩下的主要誤差；Track2 本地資料縱向 rms 1.05 m > 橫向 0.51 m，Track3 剩下的誤差很可能主要在縱向（NDT 退化方向；H2 時使用者目視停等位置領先 LiDAR 約 1 m，停等位置佔 public 27%）。下一步候選：1100 幀附近縱向偏移 −3～+3 m 掃 NDT fitness 曲線（尺度 7.5／8.5／9.0）。
 
 ## 5. 失敗嘗試與設計決策（報告用）
 

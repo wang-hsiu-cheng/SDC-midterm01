@@ -26,11 +26,17 @@ public:
         double gate_deg = 12.0;        // 線方向與目前 yaw 差的上限
         double sigma_deg = 2.0;        // 航向量測標準差
         int period_frames = 5;         // 每幾幀量一次
+        // 橫向：線在車旁的橫向位置 = 車相對建圖車軌跡的橫向偏差。NDT 的橫向有系統性偏差（Track3 約 0.5 m 偏左），
+        // 濾波器的橫向 σ 只有 0.06～0.10 m，用協方差決定增益的量測更新拉不動，所以用固定增益輕推（見 StateEstimator::NudgeLateral）
+        bool lateral_enabled = false;
+        double lateral_gain = 0.15;        // 每次量測把位置沿車體左方向推 gain × 橫向偏差
+        double lateral_max_offset = 1.5;   // m，橫向偏差超過此值視為不是同一條車道／軌跡，不推
     };
 
     struct Result {
         bool found = false;
         double delta_rad = 0.0;        // 線方向相對目前 yaw 的差（量測 − 目前）
+        double lateral_m = 0.0;        // 線在車旁（縱向 0 處）的橫向位置，左為正；線在車右邊為負＝車比線偏左
         int points = 0;
         double thinness = 0.0;
         double length = 0.0;

@@ -42,6 +42,9 @@
     trail_heading_min_length: 6.0
     trail_heading_gate_deg: 12.0
     trail_heading_sigma_deg: 1.5     # Track3：2→1.5（軌跡線強化，與 period 3 一起；Kaggle public 1.74）
+    trail_lateral_enabled: false            # 軌跡線橫向位置推位置（固定增益；NDT 橫向有系統性偏差、濾波器橫向 σ 太小拉不動）
+    trail_lateral_gain: 0.15
+    trail_lateral_max_offset: 1.5
     trail_heading_period_frames: 3
     # 第 0 幀以地圖牆面主方向修正 init_guess 的 yaw（只用地圖與 init_guess；差超過 max_dev 就放棄）
     road_heading_enabled: false

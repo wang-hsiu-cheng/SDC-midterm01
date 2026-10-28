@@ -105,6 +105,15 @@ void StateEstimator::UpdateStationary(double yaw_rate_mean, double forward_accel
     state_(3) = std::clamp(state_(3), 0.0, config_.max_speed);
 }
 
+// 沿車體左方向把位置推 gain × offset；只動 x、y 與位姿平移，不動協方差（見標頭說明）
+void StateEstimator::NudgeLateral(double offset, double gain) {
+    const double psi = state_(2);
+    state_(0) += -std::sin(psi) * gain * offset;
+    state_(1) += std::cos(psi) * gain * offset;
+    pose_(0, 3) = static_cast<float>(state_(0));
+    pose_(1, 3) = static_cast<float>(state_(1));
+}
+
 // 外部位置量測（GNSS 先驗）：對 x、y 做卡爾曼更新（Joseph 形式），並同步位姿的平移與 yaw
 void StateEstimator::UpdatePosition(double x, double y, double sigma) {
     const double yaw_before = state_(2);

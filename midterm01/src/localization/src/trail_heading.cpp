@@ -46,6 +46,7 @@ TrailHeading::Result TrailHeading::Estimate(const pcl::PointCloud<pcl::PointXYZ>
     delta = std::atan2(std::sin(2.0 * delta), std::cos(2.0 * delta)) * 0.5;
     if (std::abs(delta) * 180.0 / M_PI > config_.gate_deg) return result;
     result.delta_rad = delta;
+    if (std::abs(axis.x()) > 1e-6) result.lateral_m = mean.y() - mean.x() * axis.y() / axis.x();   // 線在 lon = 0 處的 lat
     result.found = true;
     return result;
 }

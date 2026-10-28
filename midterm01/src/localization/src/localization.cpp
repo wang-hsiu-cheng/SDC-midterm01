@@ -39,7 +39,7 @@ int LocalizationApp::Start(int argc, char** argv) {
         return -1;
     }
     diag_file_.open(output_path.string() + ".diag.csv");
-    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,trail_delta_deg,trail_applied,gnss_xy_applied,gnss_yaw_applied\n";
+    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,trail_delta_deg,trail_applied,gnss_xy_applied,gnss_yaw_applied,trail_lateral_m\n";
 
     if (yaw_bank_enabled_) {
         bank_file_.open(output_path.string() + ".bank.csv");
@@ -128,6 +128,9 @@ bool LocalizationApp::LoadParameters() {
     declare_double("trail_heading_gate_deg", trail_config_.gate_deg);
     declare_double("trail_heading_sigma_deg", trail_config_.sigma_deg);
     declare_int("trail_heading_period_frames", trail_config_.period_frames);
+    declare_bool("trail_lateral_enabled", trail_config_.lateral_enabled);
+    declare_double("trail_lateral_gain", trail_config_.lateral_gain);
+    declare_double("trail_lateral_max_offset", trail_config_.lateral_max_offset);
     declare_bool("road_heading_enabled", road_heading_config_.enabled);
     declare_double("road_heading_radius", road_heading_config_.radius);
     declare_double("road_heading_cell", road_heading_config_.cell);
@@ -615,7 +618,7 @@ bool LocalizationApp::RunLocalization() {
             }
         }
         // 地圖軌跡線航向量測（Track3）：每 period_frames 幀、非靜止、NDT 收斂時，取軌跡線方向修正 yaw（靜止時 yaw 被凍結，不量測）
-        double trail_delta_deg = std::nan("");
+        double trail_delta_deg = std::nan(""), trail_lateral_m = std::nan("");
         int trail_applied = 0;
         if (trail_config_.enabled && !yaw_bank_.active && !first && converged && trail_config_.period_frames > 0 &&
             processed % static_cast<std::size_t>(trail_config_.period_frames) == 0 && !result.stationary &&
@@ -625,6 +628,10 @@ bool LocalizationApp::RunLocalization() {
                 trail_delta_deg = trail.delta_rad * 180.0 / M_PI;
                 estimator.UpdateHeading(trail.delta_rad, trail_config_.sigma_deg * M_PI / 180.0);
                 trail_applied = 1;
+                if (trail_config_.lateral_enabled && std::abs(trail.lateral_m) <= trail_config_.lateral_max_offset) {
+                    trail_lateral_m = trail.lateral_m;
+                    estimator.NudgeLateral(trail.lateral_m, trail_config_.lateral_gain);
+                }
             }
         }
         if (!converged && !first) ++skipped_updates;
@@ -666,7 +673,7 @@ bool LocalizationApp::RunLocalization() {
         diag_file_ << ',' << sigma_lon << ',' << sigma_lat << ',' << sigma_yaw << ',' << result.spread_lon << ',' << result.n_eff << ',' << shown.accel_bias();
         const auto yaw_of = [](const Eigen::Matrix4f& T) { return std::atan2(T(1, 0), T(0, 0)); };
         diag_file_ << ',' << guess_out(0, 3) << ',' << guess_out(1, 3) << ',' << yaw_of(guess_out) << ',' << measured(0, 3) << ','
-                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << trail_delta_deg << ',' << trail_applied << ',' << gnss_xy_applied << ',' << gnss_yaw_applied << '\n';
+                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << trail_delta_deg << ',' << trail_applied << ',' << gnss_xy_applied << ',' << gnss_yaw_applied << ',' << trail_lateral_m << '\n';
         ++processed;
         rclcpp::spin_some(node_);
 

@@ -82,6 +82,10 @@ public:
     // 外部位置量測（例如 GNSS）：地圖座標下的 (x, y)，sigma 為兩軸共用的標準差（m）
     void UpdatePosition(double x, double y, double sigma);
 
+    // 沿車體左方向（目前 yaw）把位置推 gain × offset（m）。用於系統性的橫向偏差：偏差遠大於濾波器的橫向 σ 時，
+    // 協方差決定增益的量測更新拉不動，所以直接用固定增益，不改協方差
+    void NudgeLateral(double offset, double gain);
+
     // 外部航向量測（例如地圖軌跡線的方向）：delta = 量測 yaw − 目前 yaw（已包到 ±π），sigma 為量測標準差（rad）
     void UpdateHeading(double delta, double sigma);
 

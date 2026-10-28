@@ -25,7 +25,7 @@
 |---|---|---|---|---|---|
 | T1 | `gb`（GNSS xy＋yaw） | **1.13** | 1.79 | 已通過 | A 只搜 yaw、σ_yaw 4、GNSS 先驗 |
 | T2 | `g2b`（GNSS xy＋yaw） | **0.77** | 1.92（使用者提供） | 已通過 | YawBank、釘住 beta、ba 偽量測、`ba` 過程雜訊 0.002、第 0 幀牆面方向先驗、σ_yaw 4、GNSS 先驗 |
-| T3 | `bt1`（`ba2`＋軌跡線） | **1.87** | public 1.29／private 1.40 | **未通過**（差 0.58） | A（yaw＋xy 格）、`ba` 過程雜訊 0.002、地圖軌跡線航向量測；Track3 的 bag 沒有 GNSS |
+| T3 | `p5`（`bt1`＋σ_yaw 4＋軌跡線強化） | **1.74** | public 1.29／private 1.40 | **未通過**（差 0.45） | A（yaw＋xy 格）、`ba` 過程雜訊 0.002、σ_yaw 4、地圖軌跡線航向量測（σ 1.5°、每 3 幀）；Track3 的 bag 沒有 GNSS |
 
 同一條線上的直接比較：加上 GNSS 先驗後，Track1 `rhp1s4` 1.52 → `gb` 1.13（−0.39），Track2 `rhp2` 1.46 → `g2b` 0.77（−0.69）；Track1 的 σ_yaw 4 本身：`yb1` 1.62 → `rhp1s4` 1.52（−0.10）。
 
@@ -57,11 +57,14 @@
          └ H2 f81f508  ＋hold ＋floor 0.6                                              1.93   （floor 後來移除：抖動 2.9 倍、Track2 發散）
              └ zb0  H2 去掉 floor（A＋E＋hold，floor 0）                               2.01
                  ├ ba2   ＋process_sigma_accel_bias 0.002                              2.01
-                 │   └ bt1  ＋TrailHeading（軌跡線航向量測，8ce81bf）  ← 現行           1.87
+                 │   └ bt1  ＋TrailHeading（軌跡線航向量測，8ce81bf）                  1.87
+                 │       ├ p1s4 ＋meas_sigma_yaw_deg 4                                 1.85
+                 │       ├ b3   ＋停等也量測軌跡線（yaw_only）                          1.92（過修，不採用）
+                 │       └ p5   ＋σ_yaw 4 ＋軌跡線 σ 1.5°、每 3 幀  ← 現行             1.74
                  ├ ba05  ＋process_sigma_accel_bias 0.0005                             2.02
                  └ tr3   ＋TrailHeading（沒有降低 ba 雜訊）                            未提交
 ```
-（`bt1` ＝ `zb0` ＋ `ba2` ＋ `tr3` 兩者合併。）
+（`bt1` ＝ `zb0` ＋ `ba2` ＋ `tr3` 兩者合併；`p5` ＝ `bt1` ＋ `p1s4` 的 σ_yaw 4 ＋ 較溫和的軌跡線強化〔`p4tr` 的 σ 1°／gate 15° 過強，`p5` 取 σ 1.5°、每 3 幀〕。）
 
 #### 最新版本包含的外加優化（✓＝啟用；數值是該 track 的設定）
 | # | 優化 | 作用 | T1 `gb` | T2 `g2b` | T3 `bt1` | 主要證據 |
@@ -73,13 +76,13 @@
 | 5 | 第 0 幀初始位姿搜尋（A） | init 與 IMU 姿態 yaw 為中心 ±30°／5° 搜，NDT probability 選最佳 | 只搜 yaw（xy [0.0]） | 關閉 | yaw＋xy 格（0／±2 m） | T3 Kaggle 2.46→2.01（§4-3、§4-4） |
 | 6 | 點雲尺度 `ply_scale` | 各 track 的度量尺度 | 8.5 | 8.7 | 7.5 | §4-8 |
 | 7 | 前處理：範圍 30 m、體素 0.5 m | 抑制遠處單目深度誤差 | ✓ | ✓ | ✓ | Track1 20 m 發散、30 m 小幅改善 |
-| 8 | `meas_sigma_yaw_deg`（NDT yaw 量測標準差） | 讓陀螺儀多主導 yaw | 4 | 4 | 2 | §4-16（E −0.06／−0.08） |
+| 8 | `meas_sigma_yaw_deg`（NDT yaw 量測標準差） | 讓陀螺儀多主導 yaw | 4 | 4 | 4 | §4-16（Track1／2 E −0.06／−0.08；Track3 Kaggle 1.87→1.85，§4-33） |
 | 9 | `process_sigma_accel_bias`（加速度零偏過程雜訊） | 降低 NDT 縱向創新被當成 `ba` | 0.01 | 0.002 | 0.002 | T3：太早轉彎與轉彎後縱橫向偏移改善（§4-24） |
 | 10 | ZUPT 加速度均值條件＋靜止 `ba` 偽量測（`zupt_accel_mean_max` 0.08、`zupt_sigma_accel_bias` 0.01） | 避免以穩定小加速度起步被誤判成靜止 | – | ✓ | – | Track2 發散→收斂（§4-11） |
 | 11 | YawBank（yaw 假設庫） | 車速 >1 m/s 後 9 個 yaw 偏移各跑一份濾波器，150 幀後以 fitness 承諾 | – | ✓ | – | Track2 E 200→2.27（§4-11） |
 | 12 | 釘住行進偏角 beta | `init_sigma_beta_deg` 0.01、`process_sigma_beta` 1e-6 | – | ✓ | – | §4-11 |
 | 13 | 第 0 幀牆面方向先驗（`RoadHeadingPrior`） | 地圖牆面主方向修正靜止起步的初始 yaw（差 >25° 放棄） | – | ✓ | – | T2 E 2.277→1.751（§4-17） |
-| 14 | 地圖軌跡線航向量測（`TrailHeading`） | 取位姿高度 ±0.5 m、前後 12 m 的圖層點做 PCA 線擬合，線方向當 yaw 量測（σ 2°，每 5 幀，靜止不量） | – | – | ✓ | T3 紅燈結束的突然偏轉 +4.1°→+0.5°（§4-23、§4-25） |
+| 14 | 地圖軌跡線航向量測（`TrailHeading`） | 取位姿高度 ±0.5 m、前後 12 m 的圖層點做 PCA 線擬合，線方向當 yaw 量測（σ 1.5°，每 3 幀，靜止不量） | – | – | ✓ | T3 紅燈結束的突然偏轉 +4.1°→+0.5°（§4-23、§4-25） |
 | 15 | GNSS 先驗（`GnssPrior`，xy＋yaw） | 讀 bag 的 GNSS，位置外推到影格時間，σxy 0.7 m、σyaw 2°，每筆用一次（causal） | ✓ | ✓ | –（bag 沒有 GNSS） | Kaggle T1 `rhp1s4` 1.52→1.13（−0.39）、T2 `rhp2` 1.46→0.77（−0.69）（§4-31／32） |
 
 已實作但**預設關閉、未採用**：`SideBalance`（左右不平衡降權，§4-30）。已**移除**的失敗旋鈕：floor／自適應 floor、信心縮放、線上尺度估計 v1、yaw 多起點、`ply_aniso_x`、累積多幀點雲、G-ICP 等（見 §5）。
@@ -106,13 +109,14 @@
 | T3 | `zb0` | H2 去 floor | — | 2.01 |
 | T3 | `ba2` | ＋`ba` 雜訊 0.002 | — | 2.01 |
 | T3 | `ba05` | ＋`ba` 雜訊 0.0005 | — | 2.02 |
-| T3 | **`bt1`（現行）** | `ba2`＋TrailHeading | — | **1.87**（距 baseline 1.29 差 0.58） |
+| T3 | `bt1` | `ba2`＋TrailHeading | — | 1.87 |
 | T3 | `p1s4` | `bt1`＋`meas_sigma_yaw_deg` 4 | — | **1.85**（比 `bt1` 好 0.02） |
 | T3 | `b3` | `bt1`＋停等也量測軌跡線（`yaw_only`） | — | 1.92（比 `bt1` 差 0.05） |
+| T3 | **`p5`（現行）** | `bt1`＋σ_yaw 4＋`trail_heading_sigma_deg` 1.5＋`trail_heading_period_frames` 3 | — | **1.74**（比 `bt1` 好 0.13；距 baseline 1.29 差 0.45） |
 
 ### 結果檔與 yaml 的對應（提交前必須處理）
 - **Track1／Track2：官方結果＝GNSS 先驗 xy＋yaw 版（`gb`／`g2b`；分支 `feature/gnss-prior`）**：`Track1_result.txt`／`result_1.csv`（Kaggle public 1.13）、`Track2_result.txt`／`result_2.csv`（Kaggle public 0.77）；yaml 已啟用 `gnss_prior_enabled: true`（σxy 0.7 m、σyaw 2°）。官方文件明文允許使用 GNSS（使用者說明；先前「不用 GNSS」是使用者與 Claude 自訂的目標，不是競賽規則，CLAUDE.md 規則 4 已更新）。yaml 與 `-p` 覆寫等價：純 yaml 前 600 幀（`vy1`／`vy2`）與 `gb`／`g2b` 前 600 行逐位元相同（全長未重跑）。`result_1.csv`／`result_2.csv` 與先前提交的 `result_1_gnss_both.csv`／`result_2_gnss_both.csv` 位元組相同。無 GNSS 版 `rhp1s4`／`rhp2` 已移出 git 追蹤（`result/.gitignore` 只追蹤 `Track*_result.txt` 與 `result_*.csv`），仍在 worktree 磁碟與 git 歷史（`69b810c`）可取得，也可由 `-p gnss_prior_enabled:=false` 重跑。Track3 維持 `bt1`（bag 沒有 GNSS）。
-- **Track3：官方結果＝`bt1`**（`process_sigma_accel_bias` 0.002＋`trail_heading_enabled: true`，Kaggle public 1.87）：`Track3_result.txt`／`result_3.csv`；Track3 預設 yaml 全長 run（`gOff3`）與 `bt1` 逐位元相同（可由 yaml 重現）。
+- **Track3：官方結果＝`p5`**（`meas_sigma_yaw_deg` 4＋`trail_heading_sigma_deg` 1.5＋`trail_heading_period_frames` 3，其餘為 `bt1` 設定；Kaggle public 1.74）：`Track3_result.txt`／`result_3.csv`；純 yaml 全長 run（`y5`）與 `p5` 逐位元相同（可由 yaml 重現）；`result_3.csv` == 你提交的 `result_3_p5.csv`。
 - master 工作區的 `build/`、`install/` 常是舊的（git 不會更新它們）：在 master 跑之前先 `colcon build`。
 
 ### 資料
@@ -237,6 +241,7 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
    - **#6 負面**：`g1`（`trail_heading_ground_relative`：高度帶改為「位姿下方 4 m 內地圖地面 20% 分位 + 1.8 m」）轉彎段套用 71→76 幀，速度峰值 7.59 m/s、2700 幀相對 `bt1` lon +8.3 m，無明確好處（程式保留，預設關閉）。彎道擬合（二次曲線，含抗離群版本 `g3`／`g4`／`c1`）全程只套用 47／34／34 幀（`bt1` 306），2100 幀輸出−IMU 偏差 +5.2／+4.9／+5.2°（`bt1` +3.9°），已移除。**更正**：先前說「轉彎段軌跡線只套用 11 幀」是用 `tr3`／`zb0` 位姿算的；`bt1`（降低 `ba` 雜訊後軌跡較貼近軌跡線）在 2450–2900 幀自己套用 71 幀（約 79% 的可用機會），#6 的前提不成立。離線驗證：3000 幀位姿 z 偏高 2.46 m 時，位姿高度帶 0 個點、相對地面高度帶 70 個點。
    - **Kaggle public（使用者回報）：`b3` 1.92（比 `bt1` 1.87 差 0.05）、`p1s4` 1.85（比 `bt1` 好 0.02）。** 解讀（推論，無真值）：`b3` 把紅燈位置 yaw 由 +3.8° 修到 −1.1°（輸出−IMU 姿態）反而變差，真值可能在兩者之間；「輸出−IMU 姿態接近 0」不等於正確（IMU 姿態本身對真值有未知偏差）。下一步：`p5`＝`p1s4`＋較溫和的軌跡線強化（σ 1.5°、每 3 幀）；停等量測給較大的 σ（只修一半）待試。
    - **`p5`（`bt1`＋`meas_sigma_yaw_deg` 4＋`trail_heading_sigma_deg` 1.5＋`trail_heading_period_frames` 3；csv `result_3_p5.csv`；Kaggle 待使用者提交）**：public 區段（157–1257 幀）輸出−IMU 偏差平均 `bt1` +2.09°、`p1s4` +1.67°、`p4tr` +1.45°、**`p5` +1.34°**；1200 幀 +1.9°；紅燈結束 2150→2300 yaw 變化 −3.5°（2300 幀 −1.2°，起步過修）；2500 幀 +4.2°（`bt1` +6.1°、`p4tr` +9.7°）；終點 +2.0°（`bt1` +0.9°）；套用軌跡線 494 幀；平均 `final_fitness` 0.2533；終點位置相對 `bt1` (−0.5, −0.1) m、全程位置差 ≤1.3 m。
+   - **`p5` Kaggle public 1.74（使用者回報；`bt1` 1.87、`p1s4` 1.85）→ 採用為 Track3 正式版**（yaml 已設定，純 yaml 全長 `y5` 與 `p5` 逐位元相同）。
    - **評估 `b3` 是否整合（10/28，不跑新實驗）：不整合。** 反推：`b3` 相對 `bt1` 在 public 區段 25% 的幀（停等段）把 yaw 平均移了 −4.4°，Kaggle 只變差 0.05；用粗模型（其他幀 yaw rms r＝1～2.5°、只計 yaw 平移、忽略位置效應）反推，`bt1` 在停等段的 yaw 誤差約 +1.8～+2.2°、`b3` 約 −2.2～−2.6°，即**真值約在輸出−IMU 偏差 +1.6～+2.0°（量級估計，模型很粗，無真值）**。對照停等段（1000–1257 幀）輸出−IMU 偏差平均：`bt1` +3.78°、`p1s4` +2.96°、`p4tr` +2.03°、**`p5` +1.91°**、`b3` +0.24°。→ `b3` 方向對但過修約 1.5～1.8°；`p4tr`／`p5` 不靠靜止量測就落在估計的真值附近，`b3` 若與 `p5`（軌跡線 σ 1.5°）疊加只會更過修。程式保留（`trail_heading_when_stationary`＋`trail_heading_yaw_only`，預設關閉）；備案：`p5` 分數不理想時，靜止量測改用較大 σ（約 4°）只修一半。
    - **轉彎後相機點雲地面比 LiDAR 地面高（使用者觀察，已用數字確認）**：位姿 z − 地圖地面（位姿下方 4 m 內地圖點 20% 分位）0–1200 幀 1.71 m、停等 1.35 m、起步 1.58 m、**轉彎後 2450–3200 幀 2.04 m（2900 幀 2.34、3000 幀 2.45）**；點雲自己的地面在相機下方 1.53 m（前方 2–12 m、×7.5）。→ 轉彎後位姿 z 偏高約 0.5～0.9 m（位姿 z 由 5.43〔2500 幀〕漂到 6.73〔3100 幀〕，地圖地面只升 0.57 m），點雲地面落在 LiDAR 地面上方 0.5～0.9 m；位姿 pitch 對地面坡度鼻朝下約 +2.7°。原因未查（z 由 NDT 的 z 以 `z_gain` 0.5 混入、IMU 不約束；轉彎後 NDT 主要匹配前方垂直結構，z／pitch 可能退化）。可能修法：用地圖地面約束位姿 z（z＝地圖地面＋相機高度 1.7～1.9 m）；尚未實作。
 

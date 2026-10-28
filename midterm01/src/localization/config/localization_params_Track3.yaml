@@ -51,8 +51,8 @@
     trail_heading_max_thinness: 0.25
     trail_heading_min_length: 6.0
     trail_heading_gate_deg: 12.0
-    trail_heading_sigma_deg: 2.0
-    trail_heading_period_frames: 5
+    trail_heading_sigma_deg: 1.5     # Track3：2→1.5（軌跡線強化，與 period 3 一起；Kaggle public 1.74）
+    trail_heading_period_frames: 3
     trail_heading_when_stationary: false
     trail_heading_yaw_only: false           # 只更新 yaw 狀態；停等量測時避免交叉協方差帶動位置、速度、零偏
     trail_heading_ground_relative: false    # 高度帶改相對地面（位姿 z 漂移時圖層點不掉出高度帶）
@@ -108,7 +108,7 @@
     #   會讓 σ 過小而局部失控（Track1 縱向 9 m），故刻意保守，勿調小
     meas_sigma_lon: 1.1
     meas_sigma_lat: 0.5
-    meas_sigma_yaw_deg: 2.0
+    meas_sigma_yaw_deg: 4.0          # Track3：2→4（Kaggle public 1.87→1.85，再配合軌跡線強化 1.74；STATUS §4-33、§4-34）
     spread_gain: 1.0              # 多起點候選分散度加進量測 R 的倍率
     gate_chi2: 11.34
     zupt_sigma_speed: 0.02        # m/s

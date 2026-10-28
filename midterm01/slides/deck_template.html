@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera Localization on a LiDAR Map</title>
+<style>
+/* Palette: white 60% / blue 30% / khaki 10%. Sharp corners only (no border-radius). */
+:root {
+  --white: #ffffff;
+  --ink: #101828;
+  --ink-soft: #4a5468;
+  --blue: #1f5fbf;
+  --blue-deep: #0c1b33;
+  --khaki: #c8b98a;
+  --light: #f4f1e8;
+  --light-soft: #c9d3e6;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; border-radius: 0; }
+html, body { width: 100%; height: 100%; background: #14181f; overflow: hidden;
+  font-family: "Helvetica Neue", Helvetica, Arial, "Noto Sans TC", "Microsoft JhengHei", sans-serif; color: var(--ink); }
+#viewport { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+#stage { position: relative; width: 1280px; height: 720px; flex: none; transform-origin: center center; background: var(--white); }
+.slide { position: absolute; inset: 0; width: 1280px; height: 720px; display: none; background: var(--white); overflow: hidden; }
+.slide.active { display: block; }
+
+/* type scale: title 36pt, body 22pt; small labels are slide chrome only */
+h1 { position: absolute; left: 64px; bottom: 552px; width: 820px; font-size: 36pt; line-height: 1.15; font-weight: 700; letter-spacing: -0.01em; }
+h1 + .rule { position: absolute; left: 64px; top: 176px; width: 104px; height: 8px; background: var(--khaki); clip-path: polygon(0 0, 100% 0, calc(100% - 12px) 100%, 0 100%); }
+p, li, td, th { font-size: 22pt; line-height: 1.3; }
+.chrome { position: absolute; left: 64px; bottom: 26px; font-size: 14pt; color: var(--ink-soft); letter-spacing: 0.04em; }
+.tag { position: absolute; left: 0; top: 0; padding: 10px 26px 10px 64px; background: var(--khaki); color: var(--ink); font-size: 14pt; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 18px) 100%, 0 100%); }
+
+/* figure area */
+figure { position: absolute; left: 64px; top: 208px; width: 836px; }
+figure img { display: block; width: 100%; height: auto; }
+
+/* blue side panel with a slanted left edge and a khaki stripe */
+.side { position: absolute; right: 0; top: 0; width: 372px; height: 720px; background: var(--blue); clip-path: polygon(72px 0, 100% 0, 100% 100%, 0 100%); color: var(--white); }
+.stripe { position: absolute; left: 880px; top: 0; width: 100px; height: 720px; background: var(--khaki); clip-path: polygon(72px 0, 100px 0, 28px 100%, 0 100%); }
+.side-inner { position: absolute; left: 112px; right: 28px; top: 74px; }
+.kicker { font-size: 14pt; letter-spacing: 0.14em; text-transform: uppercase; color: var(--khaki); font-weight: 700; margin-bottom: 22px; }
+.side ul { list-style: none; }
+.side li { position: relative; padding-left: 26px; margin-bottom: 26px; }
+.side li::before { content: ""; position: absolute; left: 0; top: 14px; width: 12px; height: 12px; background: var(--khaki); }
+
+/* dark cover / closing */
+.dark { background: var(--blue-deep); color: var(--light); }
+.dark .wedge { position: absolute; right: 0; top: 0; width: 560px; height: 720px; background: var(--blue); clip-path: polygon(190px 0, 100% 0, 100% 100%, 0 100%); }
+.dark .wedge img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: right center; display: block; }
+.dark .wedge-line { position: absolute; left: 692px; top: 0; width: 218px; height: 720px; background: var(--khaki); clip-path: polygon(190px 0, 218px 0, 28px 100%, 0 100%); }
+.dark h1 { color: var(--light); width: 560px; top: 190px; bottom: auto; }
+.dark h1 + .rule { top: 392px; }
+.dark .sub { position: absolute; left: 64px; top: 430px; width: 560px; color: var(--light-soft); }
+.dark .meta { position: absolute; left: 64px; bottom: 54px; color: var(--light-soft); }
+.dark .tag { background: var(--khaki); }
+.dark .chrome { color: var(--light-soft); }
+.dark ul { position: absolute; left: 64px; top: 240px; width: 580px; list-style: none; }
+.dark li { position: relative; padding-left: 28px; margin-bottom: 22px; color: var(--light); }
+.dark li::before { content: ""; position: absolute; left: 0; top: 14px; width: 12px; height: 12px; background: var(--khaki); }
+.dark .thanks { position: absolute; right: 64px; bottom: 54px; text-align: right; color: var(--white); font-size: 22pt; font-weight: 700; }
+
+/* score table */
+.tbl { position: absolute; left: 64px; right: 64px; }
+table { border-collapse: collapse; width: 100%; }
+th { background: var(--blue); color: var(--white); text-align: left; padding: 10px 18px; font-weight: 700; }
+td { padding: 8px 18px; border-bottom: 2px solid #d9d6cb; }
+td.num, th.num { text-align: right; }
+tr.hl td { font-weight: 700; }
+td.bad { background: #ece3c6; }
+.note { font-size: 14pt; color: var(--ink-soft); margin-top: 12px; line-height: 1.35; }
+
+/* speaker notes (press N) */
+#notes { position: fixed; left: 0; right: 0; bottom: 0; max-height: 34vh; overflow: auto; background: rgba(12,27,51,0.96); color: var(--light); padding: 18px 28px; font-size: 18px; line-height: 1.55; display: none; z-index: 9; border-top: 4px solid var(--khaki); }
+#notes.on { display: block; }
+#hud { position: fixed; right: 14px; top: 10px; color: #8f98a8; font-size: 13px; letter-spacing: 0.06em; z-index: 8; font-family: inherit; }
+aside.n { display: none; }
+
+@media print {
+  @page { size: 1280px 720px; margin: 0; }
+  html, body { overflow: visible; background: #fff; height: auto; }
+  #viewport { position: static; display: block; }
+  #stage { transform: none !important; height: auto; width: 1280px; }
+  .slide { display: block !important; position: relative; page-break-after: always; break-after: page; }
+  #notes, #hud { display: none !important; }
+}
+</style>
+</head>
+<body>
+<div id="viewport"><div id="stage">
+
+<!-- 1. cover -->
+<section class="slide dark" data-title="Cover">
+  <div class="wedge"><img src="@@cover.png" alt=""></div><div class="wedge-line"></div>
+  <div class="tag">SDC 2026 · Midterm 01</div>
+  <h1>Localizing a Camera on a LiDAR Map</h1><div class="rule"></div>
+  <p class="sub">NDT scan matching + EKF, one pipeline for three tracks</p>
+  <p class="meta">Team 7 · Hsiu-Cheng Wang</p>
+  <aside class="n">各位好。這個期中專案是：用相機影像產生的 3D 點雲，對一張 LiDAR 地圖做定位。三個 track 共用同一套 NDT 加 EKF 管線，每個 track 再用 yaml 打開自己的外掛模組。（約 15 秒。封面的 Team name 與學號請自行填入。）</aside>
+</section>
+
+<!-- 2. task and score -->
+<section class="slide" data-title="Task">
+  <div class="tag">Task</div>
+  <h1>The task: place a camera on a LiDAR map</h1><div class="rule"></div>
+  <div style="position:absolute; left:64px; top:228px; width:470px;">
+    <p style="margin-bottom:22px;"><b>In:</b> point clouds from camera images, no absolute scale</p>
+    <p style="margin-bottom:22px;"><b>Against:</b> a pre-built LiDAR map</p>
+    <p><b>Score:</b> E = RMSE(position, m) + 0.2 · RMSE(yaw, deg)</p>
+  </div>
+  <div class="tbl" style="left:600px; top:238px; right:64px;">
+    <table>
+      <tr><th>Track</th><th class="num">Weight</th><th class="num">Baseline</th><th class="num">Ours</th></tr>
+      <tr><td>1</td><td class="num">0.3</td><td class="num">1.79</td><td class="num"><b>1.13</b></td></tr>
+      <tr><td>2</td><td class="num">0.3</td><td class="num">1.92</td><td class="num"><b>0.77</b></td></tr>
+      <tr><td>3</td><td class="num">0.4</td><td class="num">1.29</td><td class="num bad"><b>1.74</b></td></tr>
+    </table>
+    <p class="note">Kaggle public scores, lower is better. Track 3 private baseline: 1.40.</p>
+  </div>
+  <div class="chrome">02 / 12</div>
+  <aside class="n">輸入是 LoGeR 從前鏡頭影像推出來的 3D 點雲，沒有絕對尺度，要對到預建的 LiDAR 地圖。分數 E 是位置 RMSE 加上 0.2 倍的 yaw RMSE，所以 yaw 差 5 度就等於 1 分。右表是 Kaggle public：Track1 1.13、Track2 0.77，都好於 baseline；Track3 是 1.74，public baseline 是 1.29，還差 0.45，這是我們沒追上的地方，後面會講原因。Track3 權重最高，0.4。（約 35 秒）</aside>
+</section>
+
+<!-- 3. architecture -->
+<section class="slide" data-title="Pipeline">
+  <div class="tag">Pipeline</div>
+  <h1>One pipeline, three tracks</h1><div class="rule"></div>
+  <figure><img src="@@m2_architecture.png" alt="Pipeline diagram"></figure>
+  <div class="stripe"></div>
+  <aside class="side"><div class="side-inner"><p class="kicker">Key points</p><ul>
+    <li>NDT proposes, the EKF decides</li>
+    <li>Add-ons switched per track in yaml</li>
+    <li>Causal: no future frames</li>
+  </ul></div></aside>
+  <div class="chrome">03 / 12</div>
+  <aside class="n">流程：點雲先乘上尺度、裁 30 公尺、體素 0.5 公尺；NDT 從五個縱向起點各對齊一次，因為縱向是弱方向；用軟加權合成一個量測，並把候選的分散度當成量測不確定度；EKF 有七個狀態，用 IMU 預測，靜止時用 ZUPT 釘住速度。底下三個彩色方塊是各 track 專用的模組，用 yaml 開關。整個流程是 causal，不看未來幀。（約 40 秒）</aside>
+</section>
+
+<!-- backup A: scale -->
+<section class="slide" data-title="scale">
+  <div class="tag">Details</div>
+  <h1>Point-cloud scale</h1><div class="rule"></div>
+  <figure><img src="@@b1_scale.png" alt="Best scale per frame"></figure>
+  <div class="stripe"></div>
+  <aside class="side"><div class="side-inner"><p class="kicker">Details</p><ul>
+    <li>Single-frame scale sweeps pick ply_scale</li>
+    <li>T1 8.5 · T2 8.7 · T3 7.5</li>
+    <li>When stopped, best scale couples with translation</li>
+  </ul></div></aside>
+  <div class="chrome">04 / 12</div>
+  <aside class="n">點雲沒有絕對尺度，每個 track 用一個固定的 ply_scale：Track1 8.5、Track2 8.7、Track3 7.5。選法是用已知位姿做單幀掃尺度，取 fitness 最小者。Track3 行駛段最佳尺度約 7.5；停車期間升到 8.3 到 9.1，但停等時單幀最佳尺度會與平移耦合，所以只看趨勢。線上尺度估計與非等向尺度都試過，沒有改善。</aside>
+</section>
+
+<!-- backup B: ZUPT -->
+<section class="slide" data-title="ZUPT">
+  <div class="tag">Details</div>
+  <h1>ZUPT at a red light</h1><div class="rule"></div>
+  <figure style="width:790px;"><img src="@@b2_zupt.png" alt="ZUPT on and off"></figure>
+  <div class="stripe"></div>
+  <aside class="side"><div class="side-inner"><p class="kicker">Details</p><ul>
+    <li>An IMU window detects standstill</li>
+    <li>Pins speed and gyro bias</li>
+    <li>Stop drift: 6.8&nbsp;m → 0.7&nbsp;m, yaw −46° → +0.7°</li>
+  </ul></div></aside>
+  <div class="chrome">05 / 12</div>
+  <aside class="n">ZUPT 是零速更新。IMU 窗口（約 0.5 秒）內加速度與陀螺儀的標準差都很小，就判定靜止，對濾波器加偽量測：速度為 0、陀螺均值等於零偏。圖是 Track3 紅燈停等（948 到 2179 幀）只切換 zupt_enabled 的對照：關掉時位移 6.8 公尺、yaw 漂 −46 度、零偏估計被拉到 +0.0098；開著是 0.7 公尺、+0.7 度、−0.0041。Kaggle 3.98 到 2.46 是 ZUPT 加尺度 7.5 一起的結果，不是 ZUPT 單獨。</aside>
+</section>
+
+<!-- backup C: Track2 YawBank -->
+<section class="slide" data-title="Track 2 YawBank">
+  <div class="tag">Details</div>
+  <h1>Track 2: deferring the yaw decision</h1><div class="rule"></div>
+  <figure><img src="@@b3_track2_yawbank.png" alt="YawBank"></figure>
+  <div class="stripe"></div>
+  <aside class="side"><div class="side-inner"><p class="kicker">Details</p><ul>
+    <li>9 yaw hypotheses, commit after 150 frames</li>
+    <li>It commits 0° with the wall-direction prior</li>
+    <li>Bank on / off: E 1.75 / 1.71 (GNSS off)</li>
+  </ul></div></aside>
+  <div class="chrome">06 / 12</div>
+  <aside class="n">Track2 第 0 幀車子靜止，NDT 對 yaw 幾乎沒有鑑別力，所以延後 yaw 的決定：車速超過 1 公尺每秒後複製 9 份濾波器，yaw 偏移 −10 到 +30 度，150 幀後用 fitness 承諾最佳者。實測結果要誠實講：現行版本承諾的偏移是 0 度，也就是不改變濾波器 yaw；關閉 YawBank 的本地 E 是 1.71，開啟是 1.75（兩個 run 都關掉 GNSS 先驗）。承諾後兩條軌跡完全重合。Track2 yaw 的實際修正應該來自牆面方向先驗，但這是推測，沒有單獨驗證。</aside>
+</section>
+
+<!-- 4. matchers -->
+<section class="slide" data-title="Matcher">
+  <div class="tag">Matcher</div>
+  <h1>Why NDT and not G-ICP?</h1><div class="rule"></div>
+  <figure><img src="@@m3_matchers.png" alt="Matcher comparison"></figure>
+  <div class="stripe"></div>
+  <aside class="side"><div class="side-inner"><p class="kicker">Key points</p><ul>
+    <li>Bare G-ICP drifts least</li>
+    <li>In the full pipeline NDT wins on all 3 tracks</li>
+    <li>G-ICP has a systematic longitudinal bias</li>
+  </ul></div></aside>
+  <div class="chrome">07 / 12</div>
+  <aside class="n">我們先用乾淨基準比較六種配準器（純追蹤，沒有 IMU 也沒有濾波）。Track1 全長本地 E：G-ICP 最低 20.6，NDT 是 572。但套上多起點、軟加權和 EKF 之後，NDT 在三個 track 的 Kaggle 都比 G-ICP 好：1.13 對 1.26、0.77 對 0.99、1.87 對 2.16。Track3 的 NDT 對照版是 bt1，現行 p5 是 1.74。G-ICP 的縱向偏差是系統性的，調單一參數只能把發散往後推。要注意左圖只有 Track1。（約 50 秒）</aside>
+</section>
+
+<!-- 5. GNSS -->
+<section class="slide" data-title="GNSS prior">
+  <div class="tag">Tracks 1 &amp; 2</div>
+  <h1>GNSS prior on Tracks 1 and 2</h1><div class="rule"></div>
+  <figure><img src="@@fig06_gnss_prior.png" alt="GNSS prior contribution"></figure>
+  <div class="stripe"></div>
+  <aside class="side"><div class="side-inner"><p class="kicker">Key points</p><ul>
+    <li>Allowed by the official documents</li>
+    <li>Causal, about 4 Hz, σ 0.7 m and 2°</li>
+    <li>Track 1: −0.39, Track 2: −0.69</li>
+  </ul></div></aside>
+  <div class="chrome">08 / 12</div>
+  <aside class="n">Track1 和 Track2 的 bag 裡有 GNSS，官方文件明文允許使用。我們把它當成因果式先驗：只用時間戳不晚於影格、而且沒用過的最新一筆，位置 σ 0.7 公尺、yaw σ 2 度。Track1 從 1.52 降到 1.13，Track2 從 1.46 降到 0.77。Track3 的 bag 沒有 GNSS，所以不能用。（約 30 秒）</aside>
+</section>
+
+<!-- 6. Track 3 trail heading + score history -->
+<section class="slide" data-title="Track 3 heading cue">
+  <div class="tag">Track 3</div>
+  <h1>Track 3: a heading cue from the map</h1><div class="rule"></div>
+  <figure><img src="@@m5_track3_story.png" alt="Trail line and score history"></figure>
+  <div class="stripe"></div>
+  <aside class="side"><div class="side-inner"><p class="kicker">Key points</p><ul>
+    <li>A thin point line in the map gives the road direction</li>
+    <li>Heading measurement, σ 1.5°, every 3 frames</li>
+    <li>Kaggle 3.98 → 1.74</li>
+  </ul></div></aside>
+  <div class="chrome">09 / 12</div>
+  <aside class="n">Track3 沒有 GNSS，所以改用地圖本身：地圖裡有一層貼著道路、位於相機高度的細長點線。我們做 2D PCA，通過細度、長度、點數和方向門檻才當成航向量測，σ 1.5 度、每 3 幀一次。右圖是分數歷程：ZUPT 加尺度 7.5 讓 3.98 降到 2.46；初始位姿搜尋到 2.01；加軌跡線 1.87；調 σ 之後 1.74。這條線的來源我們推測是建圖車自己的軌跡，但沒有驗證，所以投影片只說「地圖中的細點線」。（約 50 秒）</aside>
+</section>
+
+<!-- 7. Track 3 diagnosis -->
+<section class="slide" data-title="Track 3 diagnosis">
+  <div class="tag">Track 3</div>
+  <h1>Where the Track 3 error lives</h1><div class="rule"></div>
+  <figure style="width:800px;"><img src="@@m6_track3_diagnosis.png" alt="Track 3 diagnosis"></figure>
+  <div class="stripe"></div>
+  <aside class="side"><div class="side-inner"><p class="kicker">Key points</p><ul>
+    <li>Lateral and yaw: structured, fixable</li>
+    <li>Longitudinal: degenerate, coupled to scale</li>
+    <li>Stopped offset ≤&nbsp;0.5&nbsp;m</li>
+  </ul></div></aside>
+  <div class="chrome">10 / 12</div>
+  <aside class="n">我們怎麼判斷偏差的方向：從輸出位姿做多起點的單幀 NDT，再固定位姿掃縱向 fitness 曲線。結論是橫向與 yaw 有結構、可以修；縱向是退化方向，最佳位置會隨尺度移動，尺度每加 1 約移 1.7 公尺；停等時縱向偏差不超過 0.5 公尺。左圖是 yaw 相對 IMU 姿態的殘差，在接近並停在紅燈的 700 到 1000 幀形成：沒有軌跡線的 zb0 最後是 +5.0 度，加軌跡線 +3.8，現行 p5 是 +1.9 度。要強調 IMU 姿態不是真值，這是相對量。（約 50 秒）</aside>
+</section>
+
+<!-- 8. dropped -->
+<section class="slide" data-title="Dropped">
+  <div class="tag">Dropped</div>
+  <h1>What we tried and dropped</h1><div class="rule"></div>
+  <div class="tbl" style="left:64px; top:208px; width:830px; right:auto;">
+    <table>
+      <tr><th style="width:38%;">Idea</th><th>Result</th></tr>
+      <tr><td>Covariance floor</td><td>T1 1.56 → 1.62; T2 diverged</td></tr>
+      <tr><td>G-ICP matcher</td><td>Worse on all 3 tracks</td></tr>
+      <tr><td>Trail update at stops</td><td>T3 1.87 → 1.92</td></tr>
+      <tr><td>Lateral nudge</td><td>T3 1.74 → 1.84</td></tr>
+      <tr><td>Ground z constraint</td><td>Rejected by visual check</td></tr>
+    </table>
+  </div>
+  <div class="stripe"></div>
+  <aside class="side"><div class="side-inner"><p class="kicker">Rule</p><ul>
+    <li>Keep only what Kaggle or a visual check supports</li>
+  </ul></div></aside>
+  <div class="chrome">11 / 12</div>
+  <aside class="n">這頁不細講。試過但沒採用的做法：covariance floor（Track1 1.56 變 1.62，Track2 發散）、G-ICP、停等也量測軌跡線（1.87 變 1.92）、軌跡線橫向微調（1.74 變 1.84），以及地圖地面 z 約束（目視否定）。另外多相機點雲和非等向尺度也沒有幫助，這裡沒列。原則是只保留有 Kaggle 或目視證據的改動。（約 15 秒）</aside>
+</section>
+
+<!-- 9. closing -->
+<section class="slide dark" data-title="Takeaways">
+  <div class="wedge"></div><div class="wedge-line"></div>
+  <div class="tag">Takeaways</div>
+  <h1 style="top:68px; bottom:auto;">Takeaways</h1><div class="rule" style="top:196px;"></div>
+  <ul>
+    <li>One NDT + EKF pipeline; each track switches on its own add-ons</li>
+    <li>Kaggle public: Track 1 1.13 · Track 2 0.77 · Track 3 1.74</li>
+    <li>Track 3: remaining error is longitudinal (scale-coupled) and yaw</li>
+  </ul>
+  <p class="thanks">Thank you · Q&amp;A</p>
+  <div class="chrome">12 / 12</div>
+  <aside class="n">總結：同一套 NDT 加 EKF 管線，三個 track 各自用 yaml 開外掛。最終 Kaggle public：Track1 1.13、Track2 0.77、Track3 1.74。Track3 剩餘的誤差主要在縱向（和尺度耦合）與 yaw；轉彎段在 private，我們無法用 Kaggle 驗證。結果可由 repo 加 yaml 重現。謝謝，歡迎提問。（約 25 秒）</aside>
+</section>
+
+</div></div>
+<div id="notes"></div>
+<div id="hud"></div>
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var stage = document.getElementById('stage');
+  var notes = document.getElementById('notes');
+  var hud = document.getElementById('hud');
+  var cur = 0;
+  function fit() {
+    var s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+    stage.style.transform = 'scale(' + s + ')';
+  }
+  function show(i) {
+    cur = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach(function (s, k) { s.classList.toggle('active', k === cur); });
+    var n = slides[cur].querySelector('aside.n');
+    notes.textContent = n ? n.textContent : '';
+    hud.textContent = (cur + 1) + ' / ' + slides.length + '   ·   N notes   F fullscreen   ← →';
+    try { history.replaceState(null, '', '#' + (cur + 1)); } catch (e) {}
+  }
+  document.addEventListener('keydown', function (e) {
+    var k = e.key;
+    if (k === 'ArrowRight' || k === 'PageDown' || k === ' ' || k === 'Enter') { show(cur + 1); e.preventDefault(); }
+    else if (k === 'ArrowLeft' || k === 'PageUp' || k === 'Backspace') { show(cur - 1); e.preventDefault(); }
+    else if (k === 'Home') show(0);
+    else if (k === 'End') show(slides.length - 1);
+    else if (k === 'n' || k === 'N') notes.classList.toggle('on');
+    else if (k === 'f' || k === 'F') { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); }
+  });
+  document.getElementById('viewport').addEventListener('click', function (e) {
+    show(e.clientX < window.innerWidth / 3 ? cur - 1 : cur + 1);
+  });
+  window.addEventListener('resize', fit);
+  fit();
+  var h = parseInt((location.hash || '').slice(1), 10);
+  show(isNaN(h) ? 0 : h - 1);
+})();
+</script>
+</body>
+</html>

@@ -6,7 +6,7 @@
 //   matcher_bench --method ndt|gicp --map <pcd> --ply_dir <dir> --init <init_guess.txt>
 //                 --out <result.txt> [--stats <stats.csv>] [--max_frames N] [--scale 8]
 //                 [--source_voxel 0.5] [--max_range 0] [--epsilon 0.01] [--submap_half 50] [--recrop_dist 10]
-//                 [--outlier_ratio 0.55] [--ndt_resolutions 4,3] [--source_min_z -1.2] [--keep_vertical 0.5] [--sor_k 20 --sor_std 1.0] [--source_side 1|-1] [--range_min 0 --range_max 10 --range_ref_scale 7.5] [--aniso_x 1 --aniso_y 1 --aniso_z 1]
+//                 [--outlier_ratio 0.55] [--ndt_resolutions 4,3] [--source_min_z -1.2] [--keep_vertical 0.5] [--sor_k 20 --sor_std 1.0] [--source_side 1|-1] [--eval_only 1] [--range_min 0 --range_max 10 --range_ref_scale 7.5] [--aniso_x 1 --aniso_y 1 --aniso_z 1]
 //                 [--ndt_resolution 3] [--ndt_step 0.2] [--max_iter 35]
 //                 [--gicp_max_corr 2.0] [--gicp_k 20] [--reject_dist 3.0] [--target_voxel 0]
 //   guess 模式（不追蹤，逐行獨立配準，用來量測收斂域與偏差）：
@@ -33,6 +33,7 @@
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
+#include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/io/ply_io.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -66,6 +67,7 @@ struct Options {
     double range_min = 0.0, range_max = 1e9;  // 診斷：只留水平距離（原始距離 × range_ref_scale）在 [min,max) 的點，用來分距離段求最佳尺度
     double range_ref_scale = 7.5;      // 距離段的換算尺度（固定，掃 --scale 時各尺度才取同一批點）
     double aniso_x = 1.0, aniso_y = 1.0, aniso_z = 1.0;  // 診斷：在 --scale 之外，前向／橫向／垂直各自再乘的倍率（各向異性尺度）
+    int eval_only = 0;                 // 1 = guess 模式下不跑配準，只在給定位姿量對齊度（輸出：截斷平均平方距離、內點比例、內點平均平方距離、點數）
     int source_side = 0;               // 1 = 只留左半（y>0）、-1 = 只留右半（y<0）：診斷點雲左右兩側各自把 NDT 拉向哪裡
     int sor_k = 0;                     // >0：統計式離群點去除的近鄰數
     double sor_std = 1.0;
@@ -88,7 +90,7 @@ bool ParseArgs(int argc, char** argv, Options& o) {
     dbl("--submap_half", o.submap_half); dbl("--recrop_dist", o.recrop_dist);
     dbl("--ndt_resolution", o.ndt_resolution); dbl("--outlier_ratio", o.outlier_ratio); str("--ndt_resolutions", o.ndt_resolutions);
     dbl("--source_min_z", o.source_min_z); dbl("--source_max_z", o.source_max_z); dbl("--keep_vertical", o.keep_vertical);
-    dbl("--normal_radius", o.normal_radius); num("--sor_k", o.sor_k); num("--source_side", o.source_side); dbl("--range_min", o.range_min); dbl("--range_max", o.range_max); dbl("--range_ref_scale", o.range_ref_scale); dbl("--aniso_x", o.aniso_x); dbl("--aniso_y", o.aniso_y); dbl("--aniso_z", o.aniso_z); dbl("--sor_std", o.sor_std); dbl("--ndt_step", o.ndt_step); num("--max_iter", o.max_iter);
+    dbl("--normal_radius", o.normal_radius); num("--sor_k", o.sor_k); num("--source_side", o.source_side); num("--eval_only", o.eval_only); dbl("--range_min", o.range_min); dbl("--range_max", o.range_max); dbl("--range_ref_scale", o.range_ref_scale); dbl("--aniso_x", o.aniso_x); dbl("--aniso_y", o.aniso_y); dbl("--aniso_z", o.aniso_z); dbl("--sor_std", o.sor_std); dbl("--ndt_step", o.ndt_step); num("--max_iter", o.max_iter);
     dbl("--gicp_max_corr", o.gicp_max_corr); num("--gicp_k", o.gicp_k); dbl("--reject_dist", o.reject_dist);
     dbl("--target_voxel", o.target_voxel);
     return !o.map.empty() && !o.ply_dir.empty() && (!o.init.empty() || !o.guess_file.empty()) && !o.out.empty() &&
@@ -268,7 +270,33 @@ int RunGuessMode(const Options& o, const Cloud::Ptr& map, const std::vector<std:
         if (!(ss >> idx) || idx >= plys.size()) continue;
         for (int r = 0; r < 3; ++r)
             for (int c = 0; c < 4; ++c) ss >> guess(r, c);
-        matcher.SetTarget(CropSubmap(map, guess.block<3, 1>(0, 3), o));
+        const auto submap = CropSubmap(map, guess.block<3, 1>(0, 3), o);
+        if (o.eval_only) {
+            // 固定位姿的對齊度：來源點雲以 guess 變換後到子地圖最近點的平方距離（上限 1 m²，避免離群點主導）
+            pcl::KdTreeFLANN<pcl::PointXYZ> tree;
+            tree.setInputCloud(submap);
+            const auto source = LoadSource(plys[idx], o);
+            double trunc_sum = 0.0, inlier_sum = 0.0;
+            int inliers = 0;
+            std::vector<int> nn(1);
+            std::vector<float> sq(1);
+            for (const auto& p : source->points) {
+                const Eigen::Vector4f q = guess * Eigen::Vector4f(p.x, p.y, p.z, 1.0f);
+                if (tree.nearestKSearch(pcl::PointXYZ(q.x(), q.y(), q.z()), 1, nn, sq) <= 0) continue;
+                trunc_sum += std::min<double>(sq[0], 1.0);
+                if (sq[0] < 0.25) {
+                    ++inliers;
+                    inlier_sum += sq[0];
+                }
+            }
+            const double n_pts = static_cast<double>(std::max<std::size_t>(1, source->size()));
+            out << idx;
+            for (int r = 0; r < 3; ++r)
+                for (int c = 0; c < 4; ++c) out << ' ' << guess(r, c);
+            out << ' ' << trunc_sum / n_pts << ' ' << inliers / n_pts << ' ' << (inliers ? inlier_sum / inliers : -1.0) << ' ' << source->size() << '\n';
+            continue;
+        }
+        matcher.SetTarget(submap);
         Eigen::Matrix4f result = guess;
         double fitness = -1.0;
         if (!matcher.Align(LoadSource(plys[idx], o), guess, result, fitness) || !result.allFinite()) result = guess;

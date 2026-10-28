@@ -37,6 +37,7 @@ struct VoxelAccumulator {
 constexpr std::int64_t kAxisBits = 21;
 constexpr std::int64_t kAxisLimit = (std::int64_t{1} << (kAxisBits - 1)) - 1;
 
+// 體素座標打包成 64-bit 鍵（每軸 21 bits）；超出範圍回傳 false（leaf 過小時會發生，該點被丟棄）
 bool VoxelKey(const pcl::PointXYZI& p, double inv_leaf, std::int64_t& key) {
     const std::int64_t ix = static_cast<std::int64_t>(std::floor(p.x * inv_leaf));
     const std::int64_t iy = static_cast<std::int64_t>(std::floor(p.y * inv_leaf));
@@ -47,6 +48,7 @@ bool VoxelKey(const pcl::PointXYZI& p, double inv_leaf, std::int64_t& key) {
     return true;
 }
 
+// 保留落在 roi_min／roi_max 長方體內的點
 Cloud::Ptr CropRoi(const Cloud::ConstPtr& input, const Options& o) {
     auto out = std::make_shared<Cloud>();
     out->reserve(input->size());
@@ -59,6 +61,7 @@ Cloud::Ptr CropRoi(const Cloud::ConstPtr& input, const Options& o) {
     return out;
 }
 
+// 以 hash 累加每個體素的質心與平均強度；點數少於 min_points_per_voxel 的體素捨棄
 Cloud::Ptr VoxelDownsample(const Cloud::ConstPtr& input, const Options& o, std::size_t& dropped_out_of_range) {
     const double inv_leaf = 1.0 / o.leaf_size;
     std::unordered_map<std::int64_t, VoxelAccumulator> voxels;
@@ -92,6 +95,7 @@ Cloud::Ptr VoxelDownsample(const Cloud::ConstPtr& input, const Options& o, std::
     return out;
 }
 
+// 檢查參數：路徑非空、leaf 非負、ROI 成對、輸出不可覆蓋輸入
 bool ValidateOptions(const Options& o, const rclcpp::Logger& logger) {
     if (o.input_file.empty() || o.output_file.empty()) {
         RCLCPP_ERROR(logger, "input_file 與 output_file 不可為空");
@@ -119,6 +123,7 @@ bool ValidateOptions(const Options& o, const rclcpp::Logger& logger) {
     return true;
 }
 
+// 讀 PCD →（可選）ROI 裁切 → 體素降採樣 → 寫出 binary PCD
 bool Run(const rclcpp::Node::SharedPtr& node) {
     const auto logger = node->get_logger();
     Options o;

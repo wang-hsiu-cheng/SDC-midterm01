@@ -12,6 +12,7 @@
 
 namespace localization {
 
+// 讀 bag 內的 GNSS（PoseStamped），yaw 取自四元數 2·atan2(qz, qw)，依時間排序
 bool GnssPrior::LoadFromBag(const std::string& bag_path, const std::string& topic, std::string& error) {
     samples_.clear();
     cursor_ = 0;
@@ -51,6 +52,7 @@ bool GnssPrior::LoadFromBag(const std::string& bag_path, const std::string& topi
     return true;
 }
 
+// 回傳時間戳 <= t_ns 且尚未用過的最新一筆（causal，每筆只用一次）；比影格時間舊超過 max_age_ms 就丟棄
 bool GnssPrior::Next(std::int64_t t_ns, double max_age_ms, GnssSample& sample) {
     bool found = false;
     GnssSample latest;

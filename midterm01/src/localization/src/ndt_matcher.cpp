@@ -2,6 +2,7 @@
 
 namespace localization {
 
+// 設定 NDT 參數：體素解析度、牛頓步長、收斂門檻、最大迭代次數
 NdtMatcher::NdtMatcher(const Config& config) {
     ndt_.setResolution(static_cast<float>(config.resolution));
     ndt_.setStepSize(config.step_size);
@@ -9,12 +10,14 @@ NdtMatcher::NdtMatcher(const Config& config) {
     ndt_.setMaximumIterations(config.max_iterations);
 }
 
+// 換目標子地圖：同步重建 NDT 的體素，以及 FitnessAt 用的最近點 KD-tree
 void NdtMatcher::SetTarget(Cloud::ConstPtr target) {
     ndt_.setInputTarget(target);
     target_ = target;
     if (target_ && !target_->empty()) target_tree_.setInputCloud(target_);
 }
 
+// 輸出位姿與地圖的對齊度（不優化、不依賴 GNSS）：source 以 pose 變換後，到 target 最近點的平均平方距離，只計 max_range 內的點
 double NdtMatcher::FitnessAt(Cloud::ConstPtr source, const Eigen::Matrix4f& pose, double max_range) const {
     if (!target_ || target_->empty() || !source || source->empty()) return -1.0;
     const double max_sq = max_range * max_range;

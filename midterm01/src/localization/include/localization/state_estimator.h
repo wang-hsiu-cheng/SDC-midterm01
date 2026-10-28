@@ -79,15 +79,11 @@ public:
     // 靜止（IMU 窗口判定）時的偽量測：速度 = 0、陀螺儀均值 = 零偏、前向加速度均值 = 加速度零偏。不改位姿
     void UpdateStationary(double yaw_rate_mean, double forward_accel_mean);
 
-    // 把位姿 z 向 target_z 拉近 gain 的比例（z 不在 EKF 狀態裡，只影響輸出與下一幀的 NDT 初值）
-    void PullHeight(double target_z, double gain);
-
     // 外部位置量測（例如 GNSS）：地圖座標下的 (x, y)，sigma 為兩軸共用的標準差（m）
     void UpdatePosition(double x, double y, double sigma);
 
     // 外部航向量測（例如地圖軌跡線的方向）：delta = 量測 yaw − 目前 yaw（已包到 ±π），sigma 為量測標準差（rad）
-    // yaw_only：只更新 yaw 狀態（其餘列的增益歸零），避免重複量測經交叉協方差把位置、速度、零偏帶走
-    void UpdateHeading(double delta, double sigma, bool yaw_only = false);
+    void UpdateHeading(double delta, double sigma);
 
     // T_meas：NDT 的 T_map_body；
     // extra_cov：量測在 (x, y, yaw) 地圖座標下的額外協方差（例如多起點候選的分散度）

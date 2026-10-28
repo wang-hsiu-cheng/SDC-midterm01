@@ -22,10 +22,12 @@ void ApplyYawDelta(Eigen::Matrix4f& T, double delta) {
 
 }  // namespace
 
+// 角度包到 (−π, π]
 double StateEstimator::WrapAngle(double a) {
     return std::atan2(std::sin(a), std::cos(a));
 }
 
+// 以第 0 幀位姿與陀螺儀零偏初始化狀態與協方差；bias_sigma <= 0 時零偏不確定度用 config 的 init_sigma_bias
 void StateEstimator::Initialize(const Eigen::Matrix4f& pose, double initial_bias, double bias_sigma) {
     pose_ = pose;
     state_ << pose(0, 3), pose(1, 3), YawOf(pose), 0.0, initial_bias, 0.0, 0.0;
@@ -40,6 +42,8 @@ void StateEstimator::Initialize(const Eigen::Matrix4f& pose, double initial_bias
 
 }
 
+// IMU 預測：用扣掉零偏的 yaw 增量與前向加速度積分 x、y、yaw、速度（位置用區間中點方向）；
+// 靜止且 zupt_hold 時位置不加過程雜訊，停等期間位置不會被雜訊推動
 void StateEstimator::Predict(double dt, double yaw_increment_raw, double forward_accel, bool stationary) {
     if (dt <= 0.0) return;
     const double x = state_(0), y = state_(1), psi = state_(2), v = state_(3), b = state_(4), beta = state_(5),
@@ -76,11 +80,13 @@ void StateEstimator::Predict(double dt, double yaw_increment_raw, double forward
     ApplyYawDelta(pose_, dpsi);
 }
 
+// 直接旋轉 yaw 狀態與位姿，不動協方差（YawBank 建立各 yaw 假設時用）
 void StateEstimator::RotateYaw(double delta) {
     state_(2) = WrapAngle(state_(2) + delta);
     ApplyYawDelta(pose_, delta);
 }
 
+// 靜止偽量測：速度 = 0、陀螺儀均值 = 零偏，有設定時再加前向加速度均值 = 加速度零偏；不改位姿
 void StateEstimator::UpdateStationary(double yaw_rate_mean, double forward_accel_mean) {
     const auto scalar_update = [this](int index, double z, double sigma) {
         const double innovation = z - state_(index);
@@ -99,10 +105,7 @@ void StateEstimator::UpdateStationary(double yaw_rate_mean, double forward_accel
     state_(3) = std::clamp(state_(3), 0.0, config_.max_speed);
 }
 
-void StateEstimator::PullHeight(double target_z, double gain) {
-    pose_(2, 3) += static_cast<float>(gain * (target_z - pose_(2, 3)));
-}
-
+// 外部位置量測（GNSS 先驗）：對 x、y 做卡爾曼更新（Joseph 形式），並同步位姿的平移與 yaw
 void StateEstimator::UpdatePosition(double x, double y, double sigma) {
     const double yaw_before = state_(2);
     Eigen::Matrix<double, 2, kStateSize> H = Eigen::Matrix<double, 2, kStateSize>::Zero();
@@ -121,15 +124,11 @@ void StateEstimator::UpdatePosition(double x, double y, double sigma) {
     pose_(1, 3) = static_cast<float>(state_(1));
 }
 
-void StateEstimator::UpdateHeading(double delta, double sigma, bool yaw_only) {
+// 外部航向量測（GNSS yaw、地圖軌跡線方向）：對 yaw 做純量卡爾曼更新（Joseph 形式），並同步位姿
+void StateEstimator::UpdateHeading(double delta, double sigma) {
     const double yaw_before = state_(2);
     const double s = cov_(2, 2) + sigma * sigma;
-    Vector7 k = cov_.col(2) / s;
-    if (yaw_only) {
-        const double k_yaw = k(2);
-        k.setZero();
-        k(2) = k_yaw;
-    }
+    const Vector7 k = cov_.col(2) / s;
     state_ += k * delta;
     state_(2) = WrapAngle(state_(2));
     state_(3) = std::clamp(state_(3), 0.0, config_.max_speed);
@@ -211,6 +210,7 @@ StateEstimator::UpdateInfo StateEstimator::Update(const Eigen::Matrix4f& T_meas,
     return info;
 }
 
+// 位置不確定度沿行進方向／橫向（m）與 yaw（度）的 1-sigma，診斷濾波器一致性用
 void StateEstimator::Sigma(double& lon, double& lat, double& yaw_deg) const {
     const double heading = state_(2) + state_(5);
     const Eigen::Vector2d f(std::cos(heading), std::sin(heading));

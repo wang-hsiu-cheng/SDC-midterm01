@@ -18,6 +18,7 @@
 
 namespace localization {
 
+// 流程：載入參數 → 建立 ROS 介面 → 開結果檔與診斷檔 → 載入 PLY 索引與地圖 → 逐幀定位 → 收尾。回傳 0＝成功
 int LocalizationApp::Start(int argc, char** argv) {
     rclcpp::init(argc, argv);
     node_ = std::make_shared<rclcpp::Node>("image_point_cloud_localizer");
@@ -38,7 +39,7 @@ int LocalizationApp::Start(int argc, char** argv) {
         return -1;
     }
     diag_file_.open(output_path.string() + ".diag.csv");
-    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,trail_delta_deg,trail_applied,side_share,side_active,gnss_xy_applied,gnss_yaw_applied,ground_z\n";
+    diag_file_ << "idx,converged,fitness,mahalanobis_sq,inflation,speed,gyro_bias,beta_deg,imu_samples,ms,sigma_lon,sigma_lat,sigma_yaw,spread_lon,n_eff,accel_bias,pred_x,pred_y,pred_yaw,meas_x,meas_y,meas_yaw,final_fitness,yaw_minus_imu_deg,trail_delta_deg,trail_applied,gnss_xy_applied,gnss_yaw_applied\n";
 
     if (yaw_bank_enabled_) {
         bank_file_.open(output_path.string() + ".bank.csv");
@@ -48,10 +49,6 @@ int LocalizationApp::Start(int argc, char** argv) {
     if (!IndexPlyFiles(ply_path_) || !LoadMap()) {
         Shutdown();
         return -1;
-    }
-
-    if (publish_global_map_) {
-        PublishGlobalMap();
     }
 
     const bool success = RunLocalization();
@@ -67,6 +64,7 @@ int LocalizationApp::Start(int argc, char** argv) {
     return success ? 0 : -1;
 }
 
+// 宣告並讀取所有參數：先用程式內預設值宣告，再被 yaml／-p 覆寫；陣列參數（多起點偏移、假設銀行偏移）空值時退回 {0}
 bool LocalizationApp::LoadParameters() {
     auto declare_double = [this](const char* name, double& value) {
         node_->declare_parameter<double>(name, value);
@@ -120,22 +118,6 @@ bool LocalizationApp::LoadParameters() {
     declare_double("gnss_prior_sigma_yaw_deg", gnss_config_.sigma_yaw_deg);
     declare_double("gnss_prior_max_age_ms", gnss_config_.max_age_ms);
     declare_string("gnss_topic", gnss_topic_);
-    declare_bool("ground_prior_enabled", ground_config_.enabled);
-    declare_double("ground_prior_camera_height", ground_config_.camera_height);
-    declare_double("ground_prior_radius", ground_config_.radius);
-    declare_double("ground_prior_z_low", ground_config_.z_low);
-    declare_double("ground_prior_z_high", ground_config_.z_high);
-    declare_int("ground_prior_min_points", ground_config_.min_points);
-    declare_double("ground_prior_gain", ground_config_.gain);
-    declare_bool("side_balance_enabled", side_config_.enabled);
-    declare_double("side_balance_left_share_min", side_config_.left_share_min);
-    declare_double("side_balance_lon_max", side_config_.lon_max);
-    declare_double("side_balance_lat_min", side_config_.lat_min);
-    declare_double("side_balance_lat_max", side_config_.lat_max);
-    declare_double("side_balance_z_low", side_config_.z_low);
-    declare_double("side_balance_z_high", side_config_.z_high);
-    declare_int("side_balance_min_points", side_config_.min_points);
-    declare_double("side_balance_yaw_sigma_deg", side_config_.yaw_sigma_deg);
     declare_bool("trail_heading_enabled", trail_config_.enabled);
     declare_double("trail_heading_z_band", trail_config_.z_band);
     declare_double("trail_heading_lon_half", trail_config_.lon_half);
@@ -146,13 +128,6 @@ bool LocalizationApp::LoadParameters() {
     declare_double("trail_heading_gate_deg", trail_config_.gate_deg);
     declare_double("trail_heading_sigma_deg", trail_config_.sigma_deg);
     declare_int("trail_heading_period_frames", trail_config_.period_frames);
-    declare_bool("trail_heading_when_stationary", trail_config_.when_stationary);
-    declare_bool("trail_heading_yaw_only", trail_config_.yaw_only);
-    declare_bool("trail_heading_ground_relative", trail_config_.ground_relative);
-    declare_double("trail_heading_layer_height", trail_config_.layer_height);
-    declare_double("trail_heading_ground_radius", trail_config_.ground_radius);
-    declare_double("trail_heading_ground_z_low", trail_config_.ground_z_low);
-    declare_double("trail_heading_ground_z_high", trail_config_.ground_z_high);
     declare_bool("road_heading_enabled", road_heading_config_.enabled);
     declare_double("road_heading_radius", road_heading_config_.radius);
     declare_double("road_heading_cell", road_heading_config_.cell);
@@ -161,7 +136,6 @@ bool LocalizationApp::LoadParameters() {
     declare_double("road_heading_max_dev_deg", road_heading_config_.max_deviation_deg);
 
     declare_bool("init_search_enabled", init_search_config_.enabled);
-    declare_bool("init_search_dump", init_search_dump_);
     declare_double("init_search_yaw_range_deg", init_search_config_.yaw_range_deg);
     declare_double("init_search_yaw_step_deg", init_search_config_.yaw_step_deg);
     node_->declare_parameter<std::vector<double>>("init_search_xy_offsets", init_search_config_.xy_offsets);
@@ -222,7 +196,6 @@ bool LocalizationApp::LoadParameters() {
 
     declare_bool("keep_alive", keep_alive_);
     declare_bool("publish_frames", publish_frames_);
-    declare_bool("publish_global_map", publish_global_map_);
     declare_int("max_frames", max_frames_);
 
     if (ply_path_.empty() || map_path_.empty() || save_path_.empty() || save_file_.empty() || bag_path_.empty()) {
@@ -233,18 +206,18 @@ bool LocalizationApp::LoadParameters() {
     return true;
 }
 
+// 建立給 RViz 看的 publisher（輸入點雲、子地圖、位姿、路徑）與 tf；不影響定位結果
 void LocalizationApp::SetupRosInterfaces() {
     const auto cloud_qos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
     input_cloud_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>("/image_point_cloud", cloud_qos);
     submap_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>("/image_point_cloud_submap", cloud_qos);
 
-    const auto map_qos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
-    map_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>("/map_pc", map_qos);
     pose_pub_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>("/transformed_image_point_cloud_pose", rclcpp::QoS(1));
     path_pub_ = node_->create_publisher<nav_msgs::msg::Path>("/localization_path", rclcpp::QoS(1));
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(node_);
 }
 
+// 載入地圖：有降採樣快取（map_cache_file）就直接用，否則讀原始 PCD 並做體素降採樣
 bool LocalizationApp::LoadMap() {
     const boost::filesystem::path map_directory(map_path_);
     const boost::filesystem::path source_path = map_directory / map_file_;
@@ -267,6 +240,7 @@ bool LocalizationApp::LoadMap() {
     return !map_cloud_->empty();
 }
 
+// 列出資料夾內的 PLY，依檔名中的時間戳（_ts_<ns>）排序；幀順序與 IMU、GNSS 的時間戳同一個時鐘
 bool LocalizationApp::IndexPlyFiles(const std::string& directory_path) {
     ply_frames_.clear();
     const boost::filesystem::path directory(directory_path);
@@ -287,6 +261,7 @@ bool LocalizationApp::IndexPlyFiles(const std::string& directory_path) {
     return !ply_frames_.empty();
 }
 
+// 讀一幀 PLY，同時取純座標與帶顏色兩份點雲（顏色只給 RViz）
 bool LocalizationApp::LoadPlyFrame(const PlyFrameInfo& frame,
                                    pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud,
                                    pcl::PointCloud<pcl::PointXYZRGB>::Ptr& color_cloud) const {
@@ -301,6 +276,7 @@ bool LocalizationApp::LoadPlyFrame(const PlyFrameInfo& frame,
     return !cloud->empty();
 }
 
+// 讀 init_guess.txt（4x4 T_map_body，逗號或空白分隔）；檔案缺失時回傳單位矩陣
 bool LocalizationApp::LoadInitialPose(Eigen::Matrix4f& pose) const {
     pose = Eigen::Matrix4f::Identity();
     if (!init_guess_file_.empty()) {
@@ -320,6 +296,7 @@ bool LocalizationApp::LoadInitialPose(Eigen::Matrix4f& pose) const {
     return IsFinite(pose);
 }
 
+// 影像點雲沒有絕對尺度，乘上各 track 的 ply_scale 換成度量單位（公尺）
 pcl::PointCloud<pcl::PointXYZ>::Ptr LocalizationApp::ScalePlyPointCloud(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& input, const double scale) const {
     auto scaled = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
     scaled->points.reserve(input->size());
@@ -333,6 +310,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr LocalizationApp::ScalePlyPointCloud(const pc
     return scaled;
 }
 
+// 同 ScalePlyPointCloud，帶顏色版（只給 RViz 顯示）
 pcl::PointCloud<pcl::PointXYZRGB>::Ptr LocalizationApp::ScalePlyColorCloud(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr& input, const double scale) const {
     auto scaled = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
     scaled->points.reserve(input->size());
@@ -350,6 +328,7 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr LocalizationApp::ScalePlyColorCloud(const
     return scaled;
 }
 
+// 前處理：去掉非有限點與超過 input_max_range 的遠點，再做體素降採樣（降低點數也讓 NDT 速度穩定）
 pcl::PointCloud<pcl::PointXYZ>::Ptr LocalizationApp::FilterInputCloud(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& input) const {
     auto finite = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
     finite->points.reserve(input->size());
@@ -375,6 +354,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr LocalizationApp::FilterInputCloud(const pcl:
     return filtered;
 }
 
+// 同 FilterInputCloud，帶顏色版（只給 RViz 顯示；不做距離過濾）
 pcl::PointCloud<pcl::PointXYZRGB>::Ptr LocalizationApp::FilterColorCloud(const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr& input) const {
     auto finite = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
     finite->points.reserve(input->size());
@@ -395,6 +375,10 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr LocalizationApp::FilterColorCloud(const p
     return filtered;
 }
 
+// 主迴圈（causal：第 k 幀只用第 0..k 幀與時間戳 <= 該幀的 IMU／GNSS）。每幀：
+//   1) 前處理點雲；2) 取 IMU 區間；3) 第 0 幀做初始位姿搜尋並初始化濾波器；
+//   4) 預測（IMU 積分，靜止時 ZUPT）→ 以多個縱向起點跑 NDT → 軟加權合併候選並用候選分散度當量測不確定度 → EKF 更新；
+//   5) 先驗量測（GNSS／地圖軌跡線）；6) 必要時啟動／承諾 yaw 假設銀行；7) 寫出位姿與診斷。
 bool LocalizationApp::RunLocalization() {
     Eigen::Matrix4f init_pose;
     if (!LoadInitialPose(init_pose)) return false;
@@ -468,14 +452,6 @@ bool LocalizationApp::RunLocalization() {
                 double imu_yaw = 0.0;
                 if (imu.LatestHeading(imu_yaw)) centers.push_back(imu_yaw);
                 const auto searched = InitialPoseSearch(init_search_config_).Search(matcher, input, init_pose, centers);
-                if (init_search_dump_) {
-                    std::ofstream dump((boost::filesystem::path(save_path_) / (save_file_ + ".initsearch.csv")).string());
-                    dump << "start_yaw_deg,lon,lat,yaw_deg,x,y,probability,fitness\n";
-                    for (const auto& s : searched.samples) {
-                        dump << s.start_yaw_deg << ',' << s.lon << ',' << s.lat << ',' << s.yaw_deg << ',' << s.x << ',' << s.y << ','
-                             << s.probability << ',' << s.fitness << '\n';
-                    }
-                }
                 if (searched.found) {
                     RCLCPP_INFO(node_->get_logger(),
                                 "Initial pose search: %d starts, yaw %.1f -> %.1f deg (IMU yaw %.1f), prob %.3f fit %.3f.",
@@ -509,8 +485,7 @@ bool LocalizationApp::RunLocalization() {
             StateEstimator::UpdateInfo info;
             bool stationary = false;
             bool converged = false;
-            double fitness = -1.0, spread_lon = 0.0, n_eff = 0.0, side_share = 0.0;
-            int side_active = 0;
+            double fitness = -1.0, spread_lon = 0.0, n_eff = 0.0;
         };
         const auto step = [&](StateEstimator& est) {
             StepResult r;
@@ -559,17 +534,7 @@ bool LocalizationApp::RunLocalization() {
                         // 第 0 幀：init_guess 帶雜訊，直接以 NDT 結果作為濾波器初值
                         est.Initialize(merged.pose, est.bias(), bias_sigma);
                     } else {
-                        Eigen::Matrix3d extra_cov = merged.spread_cov;
-                        if (side_config_.enabled && !map_manager.submap()->empty()) {
-                            const auto side = SideBalance(side_config_).Estimate(*map_manager.submap(), r.guess, est.yaw());
-                            r.side_share = side.share;
-                            r.side_active = side.active ? 1 : 0;
-                            if (side.active) {
-                                const double sigma = side_config_.yaw_sigma_deg * M_PI / 180.0;
-                                extra_cov(2, 2) += sigma * sigma / std::max(estimator_config_.spread_gain, 1e-9);
-                            }
-                        }
-                        r.info = est.Update(merged.pose, extra_cov, r.stationary);
+                        r.info = est.Update(merged.pose, merged.spread_cov, r.stationary);
                     }
                 }
             }
@@ -630,6 +595,7 @@ bool LocalizationApp::RunLocalization() {
         const Eigen::Matrix4f measured = result.measured;
         if (converged && !first) inflation_sum += info.inflation;
         if (result.stationary) ++stationary_frames;
+        // GNSS 先驗（Track1／2）：每筆樣本只用一次，位置與航向各自可開；yaw 假設銀行運作期間不套用（各假設的濾波器各自獨立）
         int gnss_xy_applied = 0, gnss_yaw_applied = 0;
         if (gnss_config_.enabled) {
             GnssSample g;
@@ -648,23 +614,16 @@ bool LocalizationApp::RunLocalization() {
                 }
             }
         }
-        double ground_z_diag = std::nan("");
-        if (ground_config_.enabled && !yaw_bank_.active && !first && !map_manager.submap()->empty()) {
-            const auto ground = GroundHeightPrior(ground_config_).Estimate(*map_manager.submap(), estimator.pose());
-            if (ground.found) {
-                ground_z_diag = ground.ground_z;
-                estimator.PullHeight(ground.target_z, ground_config_.gain);
-            }
-        }
+        // 地圖軌跡線航向量測（Track3）：每 period_frames 幀、非靜止、NDT 收斂時，取軌跡線方向修正 yaw（靜止時 yaw 被凍結，不量測）
         double trail_delta_deg = std::nan("");
         int trail_applied = 0;
         if (trail_config_.enabled && !yaw_bank_.active && !first && converged && trail_config_.period_frames > 0 &&
-            processed % static_cast<std::size_t>(trail_config_.period_frames) == 0 && (!result.stationary || trail_config_.when_stationary) &&
+            processed % static_cast<std::size_t>(trail_config_.period_frames) == 0 && !result.stationary &&
             !map_manager.submap()->empty()) {
             const auto trail = TrailHeading(trail_config_).Estimate(*map_manager.submap(), estimator.pose(), estimator.yaw());
             if (trail.found) {
                 trail_delta_deg = trail.delta_rad * 180.0 / M_PI;
-                estimator.UpdateHeading(trail.delta_rad, trail_config_.sigma_deg * M_PI / 180.0, trail_config_.yaw_only);
+                estimator.UpdateHeading(trail.delta_rad, trail_config_.sigma_deg * M_PI / 180.0);
                 trail_applied = 1;
             }
         }
@@ -707,7 +666,7 @@ bool LocalizationApp::RunLocalization() {
         diag_file_ << ',' << sigma_lon << ',' << sigma_lat << ',' << sigma_yaw << ',' << result.spread_lon << ',' << result.n_eff << ',' << shown.accel_bias();
         const auto yaw_of = [](const Eigen::Matrix4f& T) { return std::atan2(T(1, 0), T(0, 0)); };
         diag_file_ << ',' << guess_out(0, 3) << ',' << guess_out(1, 3) << ',' << yaw_of(guess_out) << ',' << measured(0, 3) << ','
-                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << trail_delta_deg << ',' << trail_applied << ',' << result.side_share << ',' << result.side_active << ',' << gnss_xy_applied << ',' << gnss_yaw_applied << ',' << ground_z_diag << '\n';
+                   << measured(1, 3) << ',' << yaw_of(measured) << ',' << final_fitness << ',' << yaw_minus_imu * 180.0 / M_PI << ',' << trail_delta_deg << ',' << trail_applied << ',' << gnss_xy_applied << ',' << gnss_yaw_applied << '\n';
         ++processed;
         rclcpp::spin_some(node_);
 
@@ -723,14 +682,7 @@ bool LocalizationApp::RunLocalization() {
     return processed > 0;
 }
 
-void LocalizationApp::PublishGlobalMap() {
-    sensor_msgs::msg::PointCloud2 message;
-    pcl::toROSMsg(*map_cloud_, message);
-    message.header.frame_id = "map";
-    message.header.stamp = node_->now();
-    map_pub_->publish(message);
-}
-
+// 把這一幀的輸入點雲、（每 10 幀）子地圖、tf、位姿與累積路徑 publish 給 RViz
 void LocalizationApp::PublishFrame(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& input,
                                    const pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr& color,
                                    const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& submap,
@@ -762,6 +714,7 @@ void LocalizationApp::PublishFrame(const pcl::PointCloud<pcl::PointXYZ>::ConstPt
     path_pub_->publish(path_);
 }
 
+// 寫一行結果：T_map_body 的前 3 列、row-major 共 12 個數字（每個 PLY 幀一行）
 void LocalizationApp::WritePose(const Eigen::Matrix4f& pose) {
     for (int row = 0; row < 3; ++row) {
         for (int column = 0; column < 4; ++column) {
@@ -773,6 +726,7 @@ void LocalizationApp::WritePose(const Eigen::Matrix4f& pose) {
     result_file_.flush();
 }
 
+// 4x4 矩陣轉 tf 的 TransformStamped（時間戳用該幀 PLY 的時間戳）
 geometry_msgs::msg::TransformStamped LocalizationApp::ToTransformStamped(const Eigen::Matrix4f& matrix,
                                                                          const std::string& parent_frame,
                                                                          const std::string& child_frame,
@@ -797,6 +751,7 @@ geometry_msgs::msg::TransformStamped LocalizationApp::ToTransformStamped(const E
     return message;
 }
 
+// 4x4 矩陣轉 PoseStamped
 geometry_msgs::msg::PoseStamped LocalizationApp::ToPoseStamped(const Eigen::Matrix4f& matrix,  const std::int64_t timestamp_ns) const {
     const auto transform = ToTransformStamped(matrix, "map", "image_point_cloud", timestamp_ns);
     geometry_msgs::msg::PoseStamped pose;
@@ -808,18 +763,12 @@ geometry_msgs::msg::PoseStamped LocalizationApp::ToPoseStamped(const Eigen::Matr
     return pose;
 }
 
+// 矩陣所有元素都是有限值
 bool LocalizationApp::IsFinite(const Eigen::Matrix4f& matrix) const {
     return matrix.array().isFinite().all();
 }
 
-Eigen::Matrix4f LocalizationApp::RigidInverse(const Eigen::Matrix4f& T) {
-    Eigen::Matrix4f inv = Eigen::Matrix4f::Identity();
-    const Eigen::Matrix3f Rt = T.block<3, 3>(0, 0).transpose();
-    inv.block<3, 3>(0, 0) = Rt;
-    inv.block<3, 1>(0, 3) = -Rt * T.block<3, 1>(0, 3);
-    return inv;
-}
-
+// 從檔名 NNNNNN_ts_<ns>.ply 取出奈秒時間戳；格式不符回傳 false
 bool LocalizationApp::TimestampNsFromPlyFilename(const boost::filesystem::path& file, std::int64_t& timestamp_ns) {
     const std::string stem = file.stem().string();
     const std::string marker = "_ts_";
@@ -837,13 +786,13 @@ bool LocalizationApp::TimestampNsFromPlyFilename(const boost::filesystem::path& 
     }
 }
 
+// 關檔並釋放 ROS 資源
 void LocalizationApp::Shutdown() {
     if (result_file_.is_open()) result_file_.close();
     if (diag_file_.is_open()) diag_file_.close();
     tf_broadcaster_.reset();
     input_cloud_pub_.reset();
     submap_pub_.reset();
-    map_pub_.reset();
     pose_pub_.reset();
     path_pub_.reset();
     node_.reset();

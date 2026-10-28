@@ -12,6 +12,7 @@
 
 namespace localization {
 
+// 一次讀完 bag 的 IMU 並依時間排序；演算法只透過 Advance 依時間單調取用
 bool ImuProcessor::LoadFromBag(const std::string& bag_path, const std::string& topic, std::string& error) {
     samples_.clear();
     cursor_ = 0;
@@ -56,6 +57,7 @@ bool ImuProcessor::LoadFromBag(const std::string& bag_path, const std::string& t
     return true;
 }
 
+// 推進到 t_ns，回傳這段時間內「繞上方向」的陀螺儀積分與扣掉重力後的前向加速度平均（只看 <= t_ns 的樣本，causal）
 ImuInterval ImuProcessor::Advance(std::int64_t t_ns) {
     constexpr double kGravity = 9.81;
     ImuInterval out;
@@ -83,6 +85,7 @@ ImuInterval ImuProcessor::Advance(std::int64_t t_ns) {
     return out;
 }
 
+// 最後一個已取用樣本的 IMU 內建姿態 yaw（只用來提出初始航向候選，不直接決定結果）
 bool ImuProcessor::LatestHeading(double& yaw) const {
     if (cursor_ == 0) return false;
     const Eigen::Matrix3d R = samples_[cursor_ - 1].orientation.toRotationMatrix();
@@ -118,6 +121,7 @@ bool ImuProcessor::IsStationary(int window_samples, double accel_std_max, double
     return true;
 }
 
+// 用 t_ns 以前的所有樣本估計陀螺儀（繞上方向）的零偏與標準差；用於起步靜止段，樣本不足時回傳 false
 bool ImuProcessor::EstimateYawBias(std::int64_t t_ns, int min_samples, double& bias, double& stddev) const {
     double sum = 0.0, sum_sq = 0.0;
     int n = 0;

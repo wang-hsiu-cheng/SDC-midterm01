@@ -28,7 +28,6 @@ struct ImuInterval {
 class ImuProcessor {
 public:
     bool LoadFromBag(const std::string& bag_path, const std::string& topic, std::string& error);
-    void SetSamples(std::vector<ImuSample> samples) { samples_ = std::move(samples); }
 
     // 推進到 t_ns，回傳上次呼叫以後的區間積分；t_ns 必須單調不減
     ImuInterval Advance(std::int64_t t_ns);

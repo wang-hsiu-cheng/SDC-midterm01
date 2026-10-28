@@ -147,4 +147,4 @@ launch 參數：`data_path`、`bag_path`、`ply_path`、`init_guess_file`、`sav
 - 標頭放在 `include/localization/`，實作放在 `src/`；每個演算法元件是一個單一職責的 class，在 `CMakeLists.txt` 編進 `localization_core`。
 - 主節點只負責流程調度、I/O 與 publish，不放演算法細節。
 - 註解用繁體中文，只寫「為什麼」；不留死碼與註解掉的舊實作。
-- 矩陣一律用 `Eigen::Matrix4f`（`T_target_source` 命名）；剛體反矩陣用 `RigidInverse`。
+- 矩陣一律用 `Eigen::Matrix4f`（`T_target_source` 命名）。

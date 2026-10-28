@@ -22,23 +22,12 @@ public:
         std::vector<double> xy_offsets{0.0, 2.0, -2.0};  // m，沿候選航向的縱向與橫向各取這些偏移（做格狀組合）
     };
 
-    // 每個起點的結果，診斷用（看 probability 對 yaw 的曲線是否有明顯的峰）
-    struct Sample {
-        double start_yaw_deg = 0.0;
-        double lon = 0.0, lat = 0.0;     // m，起點相對候選航向的偏移
-        double yaw_deg = 0.0;            // 收斂後
-        double x = 0.0, y = 0.0;
-        double probability = 0.0;
-        double fitness = 0.0;
-    };
-
     struct Result {
         Eigen::Matrix4f pose = Eigen::Matrix4f::Identity();
         double yaw_deg = 0.0;
         double probability = 0.0;
         double fitness = 0.0;
         int tried = 0;
-        std::vector<Sample> samples;
         bool found = false;
     };
 

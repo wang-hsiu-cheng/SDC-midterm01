@@ -32,24 +32,6 @@
     gnss_prior_sigma_xy: 0.7
     gnss_prior_sigma_yaw_deg: 2.0
     gnss_prior_max_age_ms: 600.0
-    # 用地圖路面約束位姿 z：z_target = 位姿 xy 周圍的地圖路面 + 相機高度（只用地圖）。預設關閉
-    ground_prior_enabled: false
-    ground_prior_camera_height: 1.85
-    ground_prior_radius: 4.0
-    ground_prior_z_low: -4.0
-    ground_prior_z_high: -0.5
-    ground_prior_min_points: 20
-    ground_prior_gain: 0.5
-    # 前方左側垂直結構比例 L/(L+R) 高時，替 yaw 量測加額外標準差，讓陀螺儀與軌跡線主導航向（只用地圖）
-    side_balance_enabled: false
-    side_balance_left_share_min: 0.45
-    side_balance_lon_max: 25.0
-    side_balance_lat_min: 2.0
-    side_balance_lat_max: 20.0
-    side_balance_z_low: -0.5
-    side_balance_z_high: 3.0
-    side_balance_min_points: 200
-    side_balance_yaw_sigma_deg: 6.0
     # 地圖軌跡線（建圖車行駛軌跡、相機高度的細長點雲線）的方向當航向量測；與影像點雲的尺度無關
     trail_heading_enabled: true     # Track3：紅燈結束的突然逆時針偏轉靠它修正（STATUS §4-23、§4-25）
     trail_heading_z_band: 0.5
@@ -61,13 +43,6 @@
     trail_heading_gate_deg: 12.0
     trail_heading_sigma_deg: 1.5     # Track3：2→1.5（軌跡線強化，與 period 3 一起；Kaggle public 1.74）
     trail_heading_period_frames: 3
-    trail_heading_when_stationary: false
-    trail_heading_yaw_only: false           # 只更新 yaw 狀態；停等量測時避免交叉協方差帶動位置、速度、零偏
-    trail_heading_ground_relative: false    # 高度帶改相對地面（位姿 z 漂移時圖層點不掉出高度帶）
-    trail_heading_layer_height: 1.8
-    trail_heading_ground_radius: 4.0
-    trail_heading_ground_z_low: -4.0
-    trail_heading_ground_z_high: -0.5
     # 第 0 幀以地圖牆面主方向修正 init_guess 的 yaw（只用地圖與 init_guess；差超過 max_dev 就放棄）
     road_heading_enabled: false
     road_heading_radius: 30.0
@@ -78,7 +53,6 @@
 
     # 第 0 幀初始位姿搜尋（init_guess 航向有雜訊；以 init 與 IMU 姿態航向為中心，由 NDT probability 挑最佳）
     init_search_enabled: true
-    init_search_dump: false       # 診斷：輸出每個起點的結果到 <結果檔>.initsearch.csv
     init_search_yaw_range_deg: 30.0
     init_search_yaw_step_deg: 5.0
     init_search_xy_offsets: [0.0, 2.0, -2.0]   # m，縱向×橫向格狀組合
@@ -139,6 +113,5 @@
     tilt_gain: 0.5
 
     publish_frames: true
-    publish_global_map: false
     keep_alive: true
     max_frames: 0

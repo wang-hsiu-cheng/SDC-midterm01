@@ -4,6 +4,7 @@
 
 namespace localization {
 
+// 車輛離上次裁切中心不超過 recrop_distance 就沿用子地圖（回傳 false）；否則以 center 為中心重新裁切（回傳 true，呼叫端要重設 NDT target）
 bool MapManager::Update(const Eigen::Vector3f& center) {
     if (submap_ && (center - crop_center_).norm() <= config_.recrop_distance) return false;
 

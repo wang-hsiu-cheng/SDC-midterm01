@@ -32,14 +32,12 @@ add_definitions(${PCL_DEFINITIONS})
 
 add_library(localization_core
   src/gnss_prior.cpp
-  src/ground_height_prior.cpp
   src/imu_processor.cpp
   src/initial_pose_search.cpp
   src/map_manager.cpp
   src/measurement_fusion.cpp
   src/ndt_matcher.cpp
   src/road_heading_prior.cpp
-  src/side_balance.cpp
   src/state_estimator.cpp
   src/trail_heading.cpp
 )

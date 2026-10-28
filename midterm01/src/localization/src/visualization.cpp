@@ -43,6 +43,7 @@ using FrameCloud = pcl::PointCloud<pcl::PointXYZRGB>;
 constexpr char kMapFrame[] = "map";
 constexpr char kBodyFrame[] = "body";
 
+// 4x4 位姿矩陣轉 ROS Pose
 geometry_msgs::msg::Pose ToPoseMsg(const Eigen::Matrix4f& T) {
     Eigen::Quaternionf q(Eigen::Matrix3f(T.block<3, 3>(0, 0)));
     q.normalize();
@@ -61,6 +62,7 @@ class VisualizationApp {
 public:
     explicit VisualizationApp(rclcpp::Node::SharedPtr node) : node_(std::move(node)) {}
 
+    // 宣告參數、建立 publisher（地圖與參考軌跡用 latched QoS，RViz 晚開也看得到）、載入輸入並發布地圖與參考軌跡
     bool Init() {
         DeclareParameters();
         auto latched = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
@@ -78,6 +80,7 @@ public:
         return true;
     }
 
+    // 依位姿檔逐幀重播（可指定起訖幀、跳幀、循環）；播放速度依 PLY 時間戳的實際間隔
     bool Play() {
         const std::size_t begin = static_cast<std::size_t>(std::max(0, start_frame_));
         const std::size_t end = end_frame_ < 0 ? poses_.size() : std::min<std::size_t>(end_frame_ + 1, poses_.size());
@@ -103,6 +106,7 @@ public:
     bool keep_alive() const { return keep_alive_; }
 
 private:
+    // 宣告並讀取所有參數（檔案路徑、ply_scale、顯示用的降採樣與裁切、播放設定）
     void DeclareParameters() {
         map_file_ = node_->declare_parameter<std::string>("map_file", "");
         pose_file_ = node_->declare_parameter<std::string>("pose_file", "");
@@ -121,6 +125,7 @@ private:
         keep_alive_ = node_->declare_parameter<bool>("keep_alive", true);
     }
 
+    // 讀位姿檔與 PLY 索引；兩者幀數不同時只播放較短的那個（提交檔必須逐幀對應）
     bool LoadInputs() {
         const auto logger = node_->get_logger();
         std::string error;
@@ -142,6 +147,7 @@ private:
         return true;
     }
 
+    // 發布地圖（只保留軌跡附近、可選強度下限），避免 RViz 顯示整張地圖過慢
     void PublishMap() {
         const auto logger = node_->get_logger();
         if (map_file_.empty()) return;
@@ -223,6 +229,7 @@ private:
         RCLCPP_INFO(node_->get_logger(), "參考軌跡 %zu 點", ref.poses.size());
     }
 
+    // 發布一幀：tf、位姿、累積路徑，以及該幀點雲（乘上 ply_scale 後以該幀位姿轉到 map）和最近 N 幀疊加
     void PublishFrame(std::size_t i) {
         const Eigen::Matrix4f& T = poses_[i];
         const auto stamp = node_->now();
@@ -262,6 +269,7 @@ private:
         }
     }
 
+    // 讀一幀 PLY 並乘上 ply_scale；frame_voxel > 0 時再降採樣（只為顯示）
     FrameCloud::Ptr LoadFrame(const std::string& path) const {
         auto cloud = std::make_shared<FrameCloud>();
         if (pcl::io::loadPLYFile(path, *cloud) < 0 || cloud->empty()) {
@@ -284,6 +292,7 @@ private:
         return filtered;
     }
 
+    // 發布 map 座標下的點雲
     void PublishCloud(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr& pub, const FrameCloud& cloud,
                       const rclcpp::Time& stamp) const {
         sensor_msgs::msg::PointCloud2 msg;

@@ -20,19 +20,64 @@ flowchart LR
 ## Layout
 
 ```
-Dockerfile, docker-compose.yml     # ROS 2 Jazzy environment (container: mid1_container)
-midterm01/                         # colcon workspace (mounted at /root/midterm)
+Dockerfile, docker-compose.yml          # ROS 2 Jazzy environment (container: mid1_container)
+midterm01/                              # colcon workspace (mounted at /root/midterm)
 ├── README.md
-├── STATUS.md                      # progress log, experiments, failed attempts
-├── report/                        # report draft
+├── CLAUDE.md                           # project rules and conventions
+├── STATUS.md                           # progress log, experiments, failed attempts
+├── TESTING.md                          # rules for running tests and parallel sweeps
+├── report/localization_report_draft.md # report draft
+├── slides/                             # presentation (build_deck.py, html template, pdf)
+├── slides_figs_en/                     # presentation figures (make_en_figs.py regenerates them)
 └── src/localization/
-    ├── CMakeLists.txt, package.xml
-    ├── config/localization_params_Track{1,2,3}.yaml   # one full parameter file per track
-    ├── launch/{localization,map_modified,visualization}.launch.py
-    ├── include/localization/*.h, src/*.cpp
-    ├── processing_codes/txt_to_idx_x_y_yaw.py          # result.txt -> Kaggle csv
-    ├── tools/                     # evaluation helpers
-    └── result/                    # Track{1,2,3}_result.txt, result_{1,2,3}.csv (final submission)
+    ├── CMakeLists.txt                  # builds localization_core and the four executables
+    ├── package.xml
+    ├── config/
+    │   ├── localization_params_Track1.yaml  # Track1 parameters (full file)
+    │   ├── localization_params_Track2.yaml  # Track2 parameters (full file)
+    │   ├── localization_params_Track3.yaml  # Track3 parameters (full file)
+    │   ├── localization.rviz                # RViz layout for localization.launch.py
+    │   └── visualization.rviz               # RViz layout for visualization.launch.py
+    ├── launch/
+    │   ├── localization.launch.py           # run localization (yaml chosen by data_path)
+    │   ├── map_modified.launch.py           # build the voxel-downsampled map cache
+    │   └── visualization.launch.py          # replay a result file in RViz
+    ├── include/localization/
+    │   ├── localization.h                   # main node declaration
+    │   ├── imu_processor.h                  # causal IMU integration, stationary detection
+    │   ├── state_estimator.h                # 7-state EKF
+    │   ├── ndt_matcher.h                    # NDT registration, multi-start
+    │   ├── measurement_fusion.h             # soft-weighted candidates, spread-based covariance
+    │   ├── map_manager.h                    # sub-map cache
+    │   ├── initial_pose_search.h            # frame-0 yaw/xy search
+    │   ├── gnss_prior.h                     # causal GNSS prior (Track1/2)
+    │   ├── road_heading_prior.h             # wall-direction prior at frame 0 (Track2)
+    │   ├── yaw_bank.h                       # yaw hypothesis bank (Track2)
+    │   ├── trail_heading.h                  # map trail-line heading measurement (Track3)
+    │   └── ply_sequence.h                   # PLY indexing and pose file reading
+    ├── src/                                 # implementations of the headers above, plus:
+    │   ├── localization.cpp                 # main node: I/O, frame loop, publishing
+    │   ├── map_modified.cpp                 # map ROI crop + voxel downsample to binary PCD
+    │   ├── visualization.cpp                # result replay (map, frames, path, reference)
+    │   └── matcher_bench.cpp                # offline registration benchmark (experiments)
+    ├── processing_codes/
+    │   └── txt_to_idx_x_y_yaw.py            # result.txt -> Kaggle csv (format conversion only)
+    ├── tools/
+    │   ├── extract_bag.py                   # export IMU/GNSS from the bag
+    │   ├── eval_ate.py                      # Kaggle metric against GNSS (Track1/2)
+    │   ├── diff_params.py                   # list differences between the three yaml files
+    │   ├── analyze_diag.py                  # diagnostics from a run's .diag.csv
+    │   ├── decompose_yaw.py                 # split yaw change into gyro / NDT correction / bias
+    │   ├── pose_vs_imu_attitude.py          # pose yaw vs IMU attitude yaw
+    │   ├── ndt_bench.py                     # single-frame NDT accuracy benchmark
+    │   ├── run_track.sh                     # one run in an isolated container
+    │   ├── sweep.sh                         # several runs in parallel
+    │   ├── docker_run.sh                    # one-shot isolated container
+    │   ├── sdc_env.sh                       # shared path setup for the scripts above
+    │   └── README.md                        # how to use the scripts
+    └── result/
+        ├── Track{1,2,3}_result.txt          # final pose files
+        └── result_{1,2,3}.csv               # final Kaggle submissions
 ```
 
 ## Usage

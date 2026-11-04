@@ -65,7 +65,14 @@ Track3 在約第 900–2200 幀停紅燈。沒有 ZUPT 時，停等期間位置�
 *圖 2　Track3 紅燈停等（第 948–2179 幀）：ZUPT 關（灰）位移與 yaw 持續漂移、零偏被帶走；ZUPT 開（綠）零偏穩在靜止窗口估計值 −0.0041 rad/s。*
 
 - 做法：零速量測、陀螺儀零偏觀測與先驗（−0.004）、`zupt_freeze_yaw`（K 的 yaw 列歸零，避免位置創新經交叉協方差轉動 yaw）、`zupt_hold`。
-- 證據：累積位移 6.6→1.5 m、yaw 漂移 19°→3.5°、轉彎 NIS 244→11；Kaggle 3.98→2.46（§4-2）。停等段路徑長 `zb0`（floor 0＋hold）1.99 m，對比僅 floor 0.6 的 22.85 m（§4-7）。
+- 證據（圖 2，第 948–2179 幀，約 1230 幀，相對停等起點；`zoff3`＝`p5` 設定加 `-p zupt_enabled:=false`，對照現行 `p5`）：
+
+| | 末端位移 | 停等段路徑長 | yaw 變化 | 第 2179 幀陀螺零偏 |
+|---|---|---|---|---|
+| ZUPT 關（`zoff3`） | 6.82 m | 18.01 m | −45.6° | +0.0099 rad/s |
+| ZUPT 開（`p5`） | 0.67 m | 1.84 m | +0.7° | −0.0041 rad/s |
+
+  零偏 −0.0041 與靜止窗口估得的值一致。Track3 的 Kaggle 由 3.98 降到 2.46，但該版同時改了 `ply_scale`（8.5→7.5）與陀螺零偏先驗，不能全歸功於 ZUPT（§4-2）。
 
 ### 2.2 NDT 多起點＋候選軟加權＋分散度進 R（E 1.99 → 1.79）
 
@@ -250,6 +257,6 @@ Track2／3 同理，`data_path` 換成對應目錄即可；參數檔依目錄名
 - [ ] 確認摘要表 Baseline 欄：Track2 baseline 1.92 為使用者提供。
 - [ ] 尚未放入的現成圖（`slides_figs_en/`，未逐張確認圖說，放入前先看圖）：`fig06_gnss_prior.png`（§2.4）、`fig09_yaw_residual.png`（§4.4）、`fig10_longitudinal_fitness.png`（§4.6）、`b1_scale.png`、`b3_track2_yawbank.png`（§2.5）、`m3_matchers.png`、`m5_track3_story.png`、`m6_track3_diagnosis.png`。
 - [ ] 圖為英文標註；報告若用中文，確認是否接受或重畫（`make_en_figs.py`）。
-- [ ] §2.1 證據句的數字（位移 6.6→1.5 m、yaw 漂移 19°→3.5°）取自 STATUS §4-2（較早版本的量測），圖 2 的 ZUPT 關曲線在第 948–2179 幀末端約 6.8 m、−45°；兩者量測條件不同，定稿前選一個來源並統一。
+- [x] §2.1 證據數字已改用圖 2 的來源重算（`zoff3` 對 `p5`）。
 - [ ] 以 pandoc／瀏覽器列印轉 PDF，檢查圖相對路徑（`../slides_figs_en/`）。
 - [ ] README 目前是舊版（仍描述 `motion_predictor`／`coarse_to_fine_gicp`），E3 前必須重寫（見 `STATUS.md` §6 P2）。

@@ -315,7 +315,22 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 不建議（已有負面證據）：多相機點雲（Track1 無準度優勢，§4-21／22）、距離相關深度校正與各向異性尺度（§4-27／28）、視覺慣性式尺度估計（尺度行駛段穩定，§4-8）、停等時降權 yaw／牆面方向再錨定（§4-30、§4-19）、起步後降權 yaw 量測（§4-18 (C)）。
 
 **P2 結案後（到 11/05）**
-- [ ] 報告（Pipeline／Contributions／Problems & Solutions／Workload／Others）、README（`zupt_*`、`init_search_*`、`yaw_bank_*`、`gnss_prior_*`、`trail_heading_*`、`road_heading_*` 參數；`analyze_diag.py` 各區段與診斷工具）、E3 zip（`localization/` 原始碼、`result_1/2/3.csv`、報告 PDF、README）。
+- [ ] **E3 上傳（截止 11/05 23:59；規範出自官方 PDF 第 22–23 頁）**。上傳檔名：`<學號1>_<學號2>_localization.zip`。
+  - **壓縮檔內容**
+    - [ ] 整個 `localization/` 資料夾（不含原始資料集：`raw_ply/`、`map.pcd`、`*.db3`、map 快取、`build/`、`install/`、`result/` 的 run 輸出皆不放）。
+    - [ ] 所有自寫程式碼（`src/`、`include/`、`config/`、`launch/`、`tools/`、`processing_codes/`）。
+    - [ ] 三個 track 的最佳提交檔，檔名固定 `result_1.csv`、`result_2.csv`、`result_3.csv`（須與 Kaggle 選定的最終提交一致）。
+    - [ ] 報告 `localization_report_<學號1>_<學號2>.pdf`（簡報影片連結可選擇附在報告內）。
+    - [ ] README：說明如何執行（Docker 建置、colcon build、地圖預處理、三個 track 的 launch 指令、轉 Kaggle csv、離線評估；各參數族 `zupt_*`、`init_search_*`、`yaw_bank_*`、`gnss_prior_*`、`trail_heading_*`、`road_heading_*`；`analyze_diag.py` 各區段與診斷工具）。須能讓 TA 重跑並重現結果（允許合理數值誤差）。
+  - **報告內容（佔 30 分；評分看原創性與解決問題；沒有實質原創貢獻的開源沿用該項 0 分）**
+    - [ ] Pipeline：程式如何運作（影像點雲 → 尺度 → NDT 多起點 → 候選融合 → 7 狀態 EKF；IMU／GNSS／軌跡線航向先驗；Track 差異）。
+    - [ ] Contributions：原創想法與改進（資料來源 §4、§5；`TrailHeading`、GNSS 先驗、牆面方向先驗、ZUPT、分散度協方差等）。
+    - [ ] Problems and Solutions：遇到的問題與解法（§5 失敗嘗試與設計決策、§4 結論）。
+    - [ ] Workload Distribution：每位成員的工作與貢獻百分比（需先確認兩位成員學號與分工，見 §7）。
+    - [ ] Others：其他（Kaggle 成績對照 §2、與 baseline 比較、限制與未做的方向）。
+  - **打包前檢查**
+    - [ ] 確認 zip 內檔名、學號順序與 PDF 檔名一致；解壓後在乾淨環境照 README 能 build。
+    - [ ] 確認 `result_1/2/3.csv` 行數等於各 track 的 PLY 幀數（Track1 3011、Track2 3299、Track3 3142）。
 - [ ] 三 track 記分卡：`analyze_diag.py` 補彙總（T1／2 E＋平滑度；T3 `final_fitness` 剖面、靜止段、位姿−IMU 偏差）。
 - [ ] 次要：運動模型槓桿臂（前鏡頭在後軸前方，轉彎時側向速度約 L·ω）；目前橫向偏移已能由 yaw 偏差解釋，不是首要。
 

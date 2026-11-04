@@ -25,7 +25,7 @@
 |---|---|---|---|---|---|
 | T1 | `gb`（GNSS xy＋yaw） | **1.13** | 1.79 | 已通過 | A 只搜 yaw、σ_yaw 4、GNSS 先驗 |
 | T2 | `g2b`（GNSS xy＋yaw） | **0.77** | 1.92（使用者提供） | 已通過 | YawBank、釘住 beta、ba 偽量測、`ba` 過程雜訊 0.002、第 0 幀牆面方向先驗、σ_yaw 4、GNSS 先驗 |
-| T3 | `p5`（`bt1`＋σ_yaw 4＋軌跡線強化） | **1.74** | public 1.29／private 1.40 | **未通過**（差 0.45） | A（yaw＋xy 格）、`ba` 過程雜訊 0.002、σ_yaw 4、地圖軌跡線航向量測（σ 1.5°、每 3 幀）；Track3 的 bag 沒有 GNSS |
+| T3 | `p5`（`bt1`＋σ_yaw 4＋軌跡線強化） | public **1.74**／private **1.36** | public 1.29／private 1.40 | public 未達；**private 通過**（1.36 ≤ 1.40，截止後公布） | A（yaw＋xy 格）、`ba` 過程雜訊 0.002、σ_yaw 4、地圖軌跡線航向量測（σ 1.5°、每 3 幀）；Track3 的 bag 沒有 GNSS |
 
 同一條線上的直接比較：加上 GNSS 先驗後，Track1 `rhp1s4` 1.52 → `gb` 1.13（−0.39），Track2 `rhp2` 1.46 → `g2b` 0.77（−0.69）；Track1 的 σ_yaw 4 本身：`yb1` 1.62 → `rhp1s4` 1.52（−0.10）。
 
@@ -341,7 +341,7 @@ Track1／3 的 raw_ply、map、`map_downsampled_1m.pcd`、init_guess、db3 齊�
 - [x] **地圖軌跡點雲（建圖車軌跡）可否用作航向／橫向先驗？** 使用者確認可使用（先前擔心的 `tl`／`th` 類疑慮已排除），已實作航向量測 `TrailHeading`（§4-23），Track3 採用。
 - [x] GNSS 先驗：官方文件明文允許（使用者說明），已實作並套用到 Track1／2（§4-31／32，Kaggle public Track1 1.13、Track2 0.77）；先前「不用 GNSS」是自訂目標，不是競賽規則。
 - [x] 多相機點雲：`3cameras_ply` 只有 Track1；Track1 單幀測試無準度優勢（§4-21／22），不為 Track3 投入（自行產生需 GPU，也無效益證據）。
-- [ ] 組號（Kaggle team name）、兩位成員學號（寫報告用）。Track2 baseline 為 1.92（使用者提供）。
+- [x] 組號 7；單人組（王修呈 a151527，已寫入報告草稿）。Track2 baseline 為 1.92（使用者提供）。
 - 已決：GNSS 官方文件明文允許，Track1／2 演算法內使用（§4-31／32）；A 以 IMU 姿態 yaw 當搜尋「候選」（最終由 NDT 決定）視為合規。
 
 ## 8. 關鍵實驗（commit／設定→結果）

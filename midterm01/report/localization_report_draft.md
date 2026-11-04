@@ -3,8 +3,8 @@
 > **草稿狀態（11/04）**：內容取自 `STATUS.md`（§2–§5）與 `slides_figs_en/` 的現成圖；`【待補】` 為需要使用者填入或確認的項目。最終交付為 PDF：`localization_report_<學號1>_<學號2>.pdf`。
 > 數字皆為 Kaggle public 分數或本地對 GNSS 的評估；Track1／2 啟用 GNSS 先驗的版本，本地對 GNSS 的 E 已循環，**只引用 Kaggle**。
 
-- 組別：【待補：group_id】
-- 成員：【待補：姓名／學號1】、【待補：姓名／學號2】
+- 組別： 7
+- 成員：王修呈 a151527
 - 程式碼與結果：`localization/`（見 README）
 
 ---
@@ -13,11 +13,11 @@
 
 以 LoGeR 前鏡頭點雲（`raw_ply`）對預建 LiDAR 地圖（`map.pcd`）做 scan matching，估計每個影像幀的車輛位姿。我們沒有直接沿用範本，而是自行設計了一條 **causal** 的管線：NDT 多起點＋候選軟加權 → IMU 驅動的 7 狀態 EKF（含 ZUPT 靜止約束）→ 各 track 以 yaml 開關的外加量測（GNSS 先驗、牆面方向先驗、地圖軌跡線航向）。
 
-| Track | 權重 r | 正式版 | Kaggle public | Baseline | 結果 |
+| Track | 權重 r | 正式版 | Kaggle | Baseline | 結果 |
 |---|---|---|---|---|---|
 | Track1 | 0.3 | `gb`（GNSS xy＋yaw） | **1.13** | 1.79 | 通過 |
 | Track2 | 0.3 | `g2b`（GNSS xy＋yaw） | **0.77** | 1.92 | 通過 |
-| Track3 | 0.4 | `p5`（軌跡線航向） | **1.74** | public 1.29／private 1.40 | public 未達 baseline；private 【待補：截止後公布的 private 分數】 |
+| Track3 | 0.4 | `p5`（軌跡線航向） | public **1.74** / private **1.36** | public 1.29／private 1.40 | public 未達 baseline；private 通過 |
 
 ---
 
@@ -203,10 +203,8 @@ Track2 以穩定 0.33 m/s² 起步，被誤判為靜止，真實加速度被當�
 
 | 成員 | 負責項目 | 貢獻比例 |
 |---|---|---|
-| 【待補：成員 1】 | 【待補】 | 【待補】% |
-| 【待補：成員 2】 | 【待補】 | 【待補】% |
-
-> 【待補：兩位成員的分工需由使用者填寫；Claude 協助撰寫程式與診斷的部分是否列入、如何描述，請使用者決定。】
+| 王修呈 | 初始環境、初版程式、開發方向與研究計畫、實驗結果分析&提出改進方向 | 100% |
+| Claude | 撰寫程式與執行實驗 | 100% |
 
 ---
 
@@ -245,8 +243,8 @@ Track2／3 同理，`data_path` 換成對應目錄即可；參數檔依目錄名
 
 ## 附錄：草稿待辦（交付前刪除本節）
 
-- [ ] 填入組別、姓名、學號、分工與貢獻比例（§5）。
-- [ ] 填入 Track3 private 分數與最終排名／是否通過 baseline（摘要表）。
+- [x] 填入組別、姓名、學號、分工與貢獻比例（§5）。
+- [x] 填入 Track3 private 分數（1.36，通過 private baseline 1.40）。最終排名若要寫再補。
 - [ ] 確認摘要表 Baseline 欄：Track2 baseline 1.92 為使用者提供。
 - [ ] 尚未放入的現成圖（`slides_figs_en/`，未逐張確認圖說，放入前先看圖）：`fig06_gnss_prior.png`（§2.4）、`fig09_yaw_residual.png`（§4.4）、`fig10_longitudinal_fitness.png`（§4.6）、`b1_scale.png`、`b3_track2_yawbank.png`（§2.5）、`m3_matchers.png`、`m5_track3_story.png`、`m6_track3_diagnosis.png`。
 - [ ] 圖為英文標註；報告若用中文，確認是否接受或重畫（`make_en_figs.py`）。

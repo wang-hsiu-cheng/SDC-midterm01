@@ -20,13 +20,19 @@ flowchart LR
 ## Layout
 
 ```
-midterm01/src/localization/
-├── config/localization_params_Track{1,2,3}.yaml   # one parameter file per track
-├── launch/                                        # localization, map_modified, visualization
-├── include/localization/, src/                    # C++ sources
-├── processing_codes/txt_to_idx_x_y_yaw.py         # result.txt -> Kaggle csv
-├── tools/                                         # evaluation helpers
-└── result/                                        # Track{1,2,3}_result.txt, result_{1,2,3}.csv
+Dockerfile, docker-compose.yml     # ROS 2 Jazzy environment (container: mid1_container)
+midterm01/                         # colcon workspace (mounted at /root/midterm)
+├── README.md
+├── STATUS.md                      # progress log, experiments, failed attempts
+├── report/                        # report draft
+└── src/localization/
+    ├── CMakeLists.txt, package.xml
+    ├── config/localization_params_Track{1,2,3}.yaml   # one full parameter file per track
+    ├── launch/{localization,map_modified,visualization}.launch.py
+    ├── include/localization/*.h, src/*.cpp
+    ├── processing_codes/txt_to_idx_x_y_yaw.py          # result.txt -> Kaggle csv
+    ├── tools/                     # evaluation helpers
+    └── result/                    # Track{1,2,3}_result.txt, result_{1,2,3}.csv (final submission)
 ```
 
 ## Usage

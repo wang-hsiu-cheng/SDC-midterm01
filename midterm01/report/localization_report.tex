@@ -25,7 +25,7 @@
 
 \setCJKmainfont[AutoFakeBold=2.5]{kaiu.ttf}
 \setCJKsansfont[AutoFakeBold=2.5]{kaiu.ttf}
-
+\setlength{\parindent}{0pt}
 
 % --- 設定圖片標題文字置中集中，不左右分散 ---
 \captionsetup[figure]{justification=centering}
@@ -104,24 +104,27 @@
 NDT 多起點對齊的候選經加權融合後作為量測，並針對
 （A）縱向對齊不穩、（B）停等與起步的漂移、（C）第 0 幀初始位姿不可靠、（D）行駛中 yaw 的系統性偏差、
 （E）缺乏全域參考五類問題，分別提出解法。
-其中\textbf{第 0 幀初始位姿搜尋}、\textbf{地圖牆面方向 prior} 與\textbf{地圖軌跡線航向量測}為本作業的原創設計。
 三個 track 的 Kaggle 成績如表~\ref{tab:summary}：Track1/2 通過 baseline，Track3 的 private 分數通過 baseline。
 \end{abstract}
 
 \begin{table}[H]
 \centering\small
 \caption{三個 track 的最終成績}\label{tab:summary}
-\begin{tabularx}{\linewidth}{@{}llYcc@{}}
+% 將量測欄設為 X（靠左換行），Kaggle 欄設為 Y（置中換行）
+\begin{tabularx}{\linewidth}{@{} l X Y c c @{}}
 \toprule
-Track & 權重 $r$ & 使用的外加量測 & Kaggle & Baseline\\
+Track & 使用的外加量測 & Kaggle & Baseline \\
 \midrule
-Track1 & 0.3 & GNSS prior（xy + yaw） & \textbf{1.13} & 1.79\\
-Track2 & 0.3 & 牆面方向 prior、YawBank、GNSS prior（xy + yaw） & \textbf{0.77} & 1.92\\
-Track3 & 0.4 & 地圖軌跡線航向量測 & public \textbf{1.74}／private \textbf{1.36}
-       & public 1.29／private 1.40\\
+Track1 & GNSS prior（xy + yaw） & \textbf{1.13} & 1.79 \\
+\addlinespace % booktabs 提供的微調間距，讓閱讀更舒適
+Track2 & 牆面方向 prior、YawBank、GNSS prior（xy + yaw） & \textbf{0.77} & 1.92 \\
+\addlinespace
+Track3 & 地圖軌跡線航向量測 & public \textbf{1.74}／ private \textbf{1.36}
+       & public 1.29／\newline private 1.40 \\
 \bottomrule
 \end{tabularx}
 \end{table}
+
 
 %====================================================================
 \section{問題與解法總覽}
@@ -178,104 +181,120 @@ E & 位置與 yaw 缺乏全域參考（Track1/2）
 每一幀依序執行：IMU 預測 $\to$ 多起點 NDT 對齊與候選融合 $\to$ EKF 量測更新
 $\to$（依 track）GNSS／軌跡線的航向與位置更新。第 0 幀額外執行初始位姿搜尋與牆面方向 prior。
 
-\subsection{競賽規則遵守}
-\begin{itemize}
-  \item \textbf{Causal}：第 $k$ 幀只用第 $0..k$ 幀的 PLY 與時間戳不晚於影格時間的 IMU／GNSS 樣本。
-  \item \textbf{無後處理、無 leaderboard probing}：Kaggle 分數只用來比較方法與設定，沒有用來反推誤差再修正軌跡。
-  \item \textbf{可重現}：每個 track 有一份完整 yaml；以純 yaml 全長重跑的結果與正式結果檔\textbf{逐位元相同}。
-\end{itemize}
-
 %====================================================================
 \section{問題 A：縱向對齊不穩}\label{sec:A}
 
 \subsection{前處理與縮放比例}
-點雲先乘上各 track 的縮放比例（Track1/2/3 為 8.5/8.7/7.5），保留水平 30~m 內的點，再做 0.5~m 的 voxel downsampling
-（遠處的 monocular depth 誤差大）。地圖離線 downsampling 成 1~m voxel 的 binary cache，執行時只截取車輛周圍
-水平 $\pm50$~m、垂直 $\pm15$~m 的子地圖，車輛移動超過 10~m 才重新截取。
+點雲先乘上各 track 的縮放比例，保留水平 30~m 內的點，再做 0.5~m 的 voxel downsampling，
+以減少遠處 monocular depth 誤差的影響。地圖離線 downsampling 成 binary cache，
+執行時只截取車輛周圍的子地圖，車輛移動足夠距離後才重新截取。
 
 縮放比例未知，因此我們以固定位姿掃描不同的縮放比例，比較點雲與地圖的對齊分數。
-行駛段的最佳縮放比例很穩定（Track3 為 7.5）。停車期間（相機不移動）最佳縮放比例會出現約 20\% 的階躍，
-我們推測是因為相機不動時連續幀沒有視角變化，深度缺少多視角約束，但這點未經驗證；
+行駛段的最佳縮放比例很穩定；停車期間最佳縮放比例會出現約 20\% 的階躍，
+我們推測是相機不動時連續幀沒有視角變化，深度缺少多視角約束，但這點未經驗證。
 停車時位置已由 ZUPT 鎖住（第~\ref{sec:B} 節），所以影響有限。
 
 \subsection{現象與原因}
 直接取多個起點中 probability 最大的 NDT 結果當量測時，量測會在不同結果之間切換，每幀跳動約 1~m。
 逐幀檢查發現：
 \begin{itemize}
-  \item \textbf{縱向對齊結果分散}：以不同縱向起點對同一幀對齊，結果的縱向分散中位數為 1.13~m；
-        單次 NDT 只能把誤差往真值方向修正約 19\%。
-  \item \textbf{NDT 誤差在連續幀間方向相似}：NDT 以預測位姿為起點，目標函數在縱向變化小，
-        結果容易停在起點附近，所以誤差會跟著預測誤差、連續多幀偏向同一邊（這是我們的推測）。
-        濾波器假設各幀量測雜訊互相獨立，這個假設不成立時，只調整雜訊參數無法同時兼顧準確與可信度。
-  \item \textbf{argmax 的結果無法反映確定性}：取 probability 最大者（argmax）時，濾波器不知道這一幀的答案其實不確定
-        （本地 $E=3.88$）。
+  \item \textbf{縱向對齊結果分散}：以不同縱向起點對同一幀對齊，結果的縱向分散中位數為 1.13~m；單次 NDT 只能把誤差往真值方向修正約 19\%。
+  \item \textbf{NDT 誤差在連續幀間方向相似}：NDT 以預測位姿為起點，目標函數在縱向變化小，結果容易停在起點附近，所以誤差會跟著預測誤差、連續多幀偏向同一邊。濾波器假設各幀量測雜訊互相獨立，這個假設不成立時，只調整雜訊參數無法同時兼顧準確與可信度。
+  \item \textbf{argmax 的結果無法反映確定性}：取 probability 最大者（argmax）時，濾波器不知道這一幀的答案其實不確定。
 \end{itemize}
 因此我們的設計原則是：\textbf{不要相信單一個 NDT 答案，而是把每幀的確定性量化後交給濾波器}。
 
 \subsection{多起點 NDT 對齊}
 \textbf{NDT}（Normal Distributions Transform）把地圖切成 voxel，每個 voxel 以一個高斯分佈描述其中的點；
-對齊時尋找位姿，使點雲落在這些高斯分佈上的機率最大。對齊結果附帶 \textbf{transformation probability}
-（點雲落在地圖高斯分佈上的機率，越大表示對齊越好）。
+對齊時尋找位姿，使點雲落在這些高斯分佈上的機率最大。對齊結果附帶 \textbf{transformation probability}，
+表示點雲落在這些高斯分佈上的機率，越大表示對齊越好。
 
-\textbf{多起點（multi-start）}是指：對同一幀點雲，用不同的初始位姿各執行一次 NDT。我們以 EKF 預測位姿為中心，
-沿預測航向取縱向偏移 $0,\ \pm1.5,\ \pm3$~m 共 5 個起點（PCL 的 NDT，解析度 3~m、步長 0.2、收斂門檻 0.01、
-最多 35 次迭代）。每個收斂的結果稱為一個\textbf{候選}，帶有位姿 $T_i$ 與 probability $p_i$。
+\textbf{多起點（multi-start）}是指對同一幀點雲，用不同的初始位姿各執行一次 NDT。我們以 EKF 預測位姿為中心，
+沿預測航向取縱向偏移 $0,\ \pm1.5,\ \pm3$~m 共 5 個起點。每個收斂的結果稱為一個\textbf{候選}，
+帶有位姿 $T_i$ 與 probability $p_i$。
 起點只沿縱向展開，因為縱向是結果最分散的方向；橫向與 yaw 由 NDT 自己收斂。
 如果各候選落在同一點，表示這一幀的答案確定；反之則表示答案不確定。
 
 \subsection{候選加權融合}
-\textbf{目的}：把 5 個候選合成一個量測，並量化這一幀的不確定程度。
-
-\textbf{做法}：對每個候選計算權重，再做加權平均。令預測位姿的航向為 $\hat\psi$，
-第 $i$ 個候選相對預測的偏移在航向座標下分解為縱向 $o_i^{\mathrm{lon}}$、橫向 $o_i^{\mathrm{lat}}$ 與 yaw 差 $o_i^{\psi}$：
+我們把 5 個候選合成一個量測，並同時量化這一幀的不確定程度。每個候選先依下式計算權重，再做加權平均。
+令第 $i$ 個候選相對預測位姿的偏移，在預測航向座標下分解為縱向 $o_i^{\mathrm{lon}}$、橫向 $o_i^{\mathrm{lat}}$ 與 yaw 差 $o_i^{\psi}$：
 \begin{equation}
 w_i\ \propto\ \underbrace{\left(\frac{p_i}{p_{\max}}\right)^{\kappa}}_{\text{對齊品質}}
 \cdot\underbrace{\exp\!\left[-\frac12\left(\frac{(o_i^{\mathrm{lon}})^2}{\sigma_{\mathrm{lon}}^2}
 +\frac{(o_i^{\mathrm{lat}})^2}{\sigma_{\mathrm{lat}}^2}
 +\frac{(o_i^{\psi})^2}{\sigma_{\psi}^2}\right)\right]}_{\text{Gaussian prior（以預測為中心）}},\qquad \sum_i w_i=1.
 \end{equation}
-其中 $\kappa=4$（越大越接近 argmax），$(\sigma_{\mathrm{lon}},\sigma_{\mathrm{lat}},\sigma_{\psi})=(2~\text{m},\,1~\text{m},\,5^{\circ})$。
-融合後的量測為：位置（含 $z$）取加權平均 $\bar{\mathbf p}=\sum_i w_i\mathbf p_i$；
-yaw 以最佳候選 $\psi_b$ 為參考取差值平均 $\bar\psi=\psi_b+\sum_i w_i\,\mathrm{wrap}(\psi_i-\psi_b)$（避免角度繞圈）；
-roll/pitch 沿用最佳候選。同時計算候選相對加權平均的\textbf{分散度}：
+權重由兩項相乘：第一項偏好 probability 高的候選，$\kappa$ 越大越接近 argmax；
+第二項是以預測為中心的 Gaussian prior，避免被系統性偏後的候選拉走。
+我們取 $\kappa=4$、$(\sigma_{\mathrm{lon}},\sigma_{\mathrm{lat}},\sigma_{\psi})=(2~\text{m},\,1~\text{m},\,5^{\circ})$；
+若所有權重都被 prior 壓到 0，則退回 probability 最大的候選。
+
+融合後的位置（含 $z$）取加權平均 $\bar{\mathbf p}=\sum_i w_i\mathbf p_i$；
+yaw 以最佳候選 $\psi_b$ 為參考取差值平均 $\bar\psi=\psi_b+\sum_i w_i\,\mathrm{wrap}(\psi_i-\psi_b)$，避免角度繞圈；
+roll/pitch 沿用最佳候選。候選相對加權平均的\textbf{分散度}為
 \begin{equation}
 \Sigma_s=\sum_i w_i\,\boldsymbol\delta_i\boldsymbol\delta_i^{\top},\qquad
 \boldsymbol\delta_i=\bigl(x_i-\bar x,\ y_i-\bar y,\ \mathrm{wrap}(\psi_i-\bar\psi)\bigr)^{\top}.
 \end{equation}
-
-\textbf{為何這麼做}：權重的第一項偏好對齊品質高的候選；第二項是以預測為中心的 Gaussian prior，
-避免被系統性偏後的候選拉走。若所有權重都被 prior 壓到 0（候選都離預測很遠），退回 probability 最大的候選。
-$\Sigma_s$ 是這一幀量測的\emph{經驗不確定度}：候選一致時接近 0，縱向分歧時縱向的值變大。
+$\Sigma_s$ 是這一幀量測的經驗不確定度：候選一致時接近 0，縱向分歧時縱向的值變大。
 
 \subsection{量測 covariance 與 EKF 更新}
-EKF 的狀態為 $\mathbf x=[x,\ y,\ \psi,\ v,\ b_g,\ \beta,\ b_a]^{\top}$：
-位置、航向、速度、gyro bias、travel-angle offset（車頭方向與實際行進方向的夾角）、accelerometer bias。
-融合後的量測 $\mathbf z=(\bar x,\bar y,\bar\psi)$ 直接觀測前三個狀態。
+EKF 有 7 個狀態（表~\ref{tab:state}），融合後的量測 $\mathbf z=(\bar x,\bar y,\bar\psi)$ 直接觀測前三個。
 
-\textbf{量測 covariance}由兩部分組成：
+\begin{table}[H]
+\centering\small
+\caption{EKF 的狀態}\label{tab:state}
+\begin{tabularx}{\linewidth}{@{}cY@{}}
+\toprule
+狀態 & 意義\\
+\midrule
+$x,\ y$ & 位置\\
+$\psi$ & 航向\\
+$v$ & 速度\\
+$b_g$ & gyro bias\\
+$\beta$ & travel-angle offset，車頭方向與實際行進方向的夾角\\
+$b_a$ & accelerometer bias\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+量測的可信程度由量測 covariance $R$ 決定。我們把它拆成三個來源（表~\ref{tab:R}），
+最後合成一個式子：
 \begin{equation}
-R_0=\underbrace{\mathrm{blkdiag}\!\Bigl(Q_{\beta}\,\mathrm{diag}(\sigma_{\mathrm{lon}}'^2,\ \sigma_{\mathrm{lat}}'^2)\,Q_{\beta}^{\top},\ \sigma_{\psi}'^2\Bigr)}_{\text{基準雜訊}}+\underbrace{g\,\Sigma_s}_{\text{這一幀的分散度}},
+R=\max\!\left(1,\ \frac{d^2}{\chi^2_{\mathrm{th}}}\right)\bigl(R_{\mathrm{base}}+\Sigma_s\bigr).
 \end{equation}
-其中 $Q_\beta$ 是以航向 $\psi+\beta$ 組成的旋轉矩陣（讓縱向與橫向的雜訊沿行進方向分解），$g=1$。
-\textbf{基準雜訊}代表「NDT 平均有多準」。我們實測 NDT 創新（量測與預測之差）的標準差約為縱向 0.45~m、橫向 0.33~m、
-yaw 1.2\dg，但把 $R$ 設得這麼小，會讓濾波器過度相信 NDT，在 Track1 曾造成縱向局部失控達 9~m；
-因此刻意保守地設為 $(\sigma_{\mathrm{lon}}',\sigma_{\mathrm{lat}}',\sigma_{\psi}')=(1.1~\text{m},\,0.5~\text{m},\,4^{\circ})$，
-這組數值是手動調整得到的，不是直接由統計量得出。
-\textbf{$g\Sigma_s$}則補上「這一幀的確定程度」。
 
-\textbf{離群量測的處理}：不丟棄量測，而是限制它的影響。令
-$d^2=\boldsymbol\nu^{\top}S^{-1}\boldsymbol\nu$（$S=HPH^{\top}+R_0$、$\boldsymbol\nu$ 為創新），
-當 $d^2$ 超過 chi-square 門檻 11.34 時，把 $R$ 按比例放大 $d^2/11.34$。預測錯了仍可靠 $P$ 的成長慢慢拉回。
-最後組回位姿：$x,y,\psi$ 取濾波結果，roll/pitch 與 $z$ 以增益 0.5 向 NDT 結果收斂。
+\begin{table}[H]
+\centering\small
+\caption{量測 covariance 的三個組成}\label{tab:R}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{0.2\linewidth}YY@{}}
+\toprule
+組成 & 內容 & 作用\\
+\midrule
+基準雜訊 $R_{\mathrm{base}}$
+  & 縱向、橫向（沿行進方向分解）與 yaw 的標準差，分別為 1.1~m、0.5~m、4\dg
+  & 代表 NDT 平均有多準，縱向給較大的值\\
+候選分散度 $\Sigma_s$
+  & 上一節的候選分散度
+  & 反映這一幀有多確定；候選分歧時自動放大 $R$\\
+離群放大
+  & Mahalanobis 距離 $d^2$ 超過 chi-square 門檻 $\chi^2_{\mathrm{th}}=11.34$ 時，$R$ 乘上 $d^2/\chi^2_{\mathrm{th}}$
+  & 限制離群量測的影響，但不丟棄量測\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+基準雜訊是手動調整的保守值：實測 NDT 創新（量測與預測之差）比它小，
+但設得太小會讓濾波器過度相信 NDT 而失控，因此刻意放大。
+離群量測不丟棄，是因為預測錯誤時，仍需要量測把狀態逐步拉回。
+更新後，$x,y,\psi$ 取濾波結果，roll/pitch 與 $z$ 則以固定增益向 NDT 結果靠攏。
 
 \subsection{IMU 預測}
-\textbf{目的}：在兩幀 NDT 量測之間，用 IMU 推算車輛的航向、速度與位置，作為下一幀 NDT 的起點。
-縱向的速度完全由 IMU 提供，因為 NDT 在縱向最不可靠。
-
-\textbf{做法}：
+兩幀 NDT 量測之間，由 IMU 推算車輛的航向、速度與位置，作為下一幀 NDT 的起點。
+縱向速度完全由 IMU 提供，因為 NDT 在縱向最不可靠。推算分成三步：
 \begin{enumerate}
-  \item \textbf{航向}：把陀螺儀角速度積分得到航向變化，再扣除 gyro bias（靜止時估計，行駛中持續更新）。
-  \item \textbf{速度}：把前向加速度（IMU 姿態扣除重力後）扣除 accelerometer bias 後積分。
+  \item \textbf{航向}：把陀螺儀角速度積分得到航向變化，再扣除 gyro bias。
+  \item \textbf{速度}：把前向加速度扣除 accelerometer bias 後積分。
   \item \textbf{位置}：沿行進方向把速度積分；行進方向取這一段航向的\emph{中點}，再加上 travel-angle offset $\beta$。
 \end{enumerate}
 寫成公式為（$\Delta\psi=\Delta\psi_{\mathrm{gyro}}-b_g\Delta t$ 為扣除 bias 後的航向變化）：
@@ -288,9 +307,9 @@ x_{k+1}&=x_k+v\,\Delta t\cos h,\\ y_{k+1}&=y_k+v\,\Delta t\sin h,
 v_{k+1}=\mathrm{clip}\bigl(v+(a_{\mathrm{fwd}}-b_a)\Delta t,\ 0,\ v_{\max}\bigr).
 \end{equation}
 
-\textbf{為何這樣設計}：用區間中點方向積分位置，可以避免在轉彎時用起點方向造成的位置誤差（航向在這一段會變化）；
-把速度交給 IMU，是因為候選分散度 $\Sigma_s$ 已把縱向不確定的 NDT 量測降權，NDT 縱向創新就不容易把速度帶偏。
-這個設計的效果見第~\ref{sec:B} 節（accelerometer bias 的處理）。
+位置積分採用區間中點方向，是因為航向在這一段會變化，用起點方向會在轉彎時產生位置誤差。
+速度交給 IMU 後，縱向不確定的 NDT 量測已被分散度 $\Sigma_s$ 降權，不容易把速度帶偏；
+accelerometer bias 的處理見第~\ref{sec:B} 節。
 
 \subsection{結果數據分析}
 表~\ref{tab:fusion} 比較了幾種處理 NDT 候選的方式。加權融合並把分散度加入量測 covariance，本地 $E$ 最低。
@@ -317,7 +336,7 @@ v_{k+1}=\mathrm{clip}\bigl(v+(a_{\mathrm{fwd}}-b_a)\Delta t,\ 0,\ v_{\max}\bigr)
 \toprule
 方案 & 結果 & 放棄原因\\
 \midrule
-線上估計縮放比例（每 3 幀以 5 個等比候選比較 NDT fitness）
+runtime 估計縮放比例（每 3 幀以 5 個等比候選比較 NDT fitness）
   & Track1 本地 $E$ 由 1.73 變差為 2.24
   & fitness 較好的縮放比例會吸收平移誤差（縮放與平移互相補償），改用各 track 固定的縮放比例\\
 G-ICP 取代 NDT
@@ -326,12 +345,9 @@ G-ICP 取代 NDT
 累積多幀點雲後再對齊（$K=4/10$）
   & 本地 $E$ 為 1.94／487（發散），耗時 1.6--3.3 倍
   & 準度沒有提升且發散\\
-調整 NDT 參數與前處理（解析度、最大距離、粗到細、去地面、離群點去除）
-  & 沒有任何一類在三個 track 同時提高收斂率與準度
-  & 準度上限由點雲本身決定，參數調整空間有限\\
 多相機點雲
   & Track1 單幀準度與單相機打平，且對縮放比例更敏感
-  & 沒有準度優勢\\
+  & 沒有比較準\\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -354,24 +370,24 @@ ZUPT 關（灰）時位移與 yaw 持續漂移、gyro bias 被帶走；ZUPT 開�
 \end{figure}
 
 \subsection{解法：ZUPT 與靜止鎖定}
-ZUPT（Zero-velocity UPdaTe）以 IMU 的滑動 window（約 0.5~s）判定靜止：window 內加速度與陀螺儀的標準差都小於門檻。
-靜止時執行：
+ZUPT（Zero-velocity UPdaTe）以 IMU 的滑動 window 判定靜止：window 內加速度與陀螺儀的標準差都小於門檻。
+靜止時執行三項處理：
 \begin{enumerate}
-  \item \textbf{零速更新}：速度 pseudo-measurement 為 0，陀螺儀均值當作 gyro bias 的觀測（並加上 prior $-0.004$）。
-  \item \textbf{凍結 yaw}（\code{zupt_freeze_yaw}）：量測更新時，Kalman gain 的\emph{整列} yaw 設為 0。
-        只把 yaw 創新設為 0 是不夠的：位置創新會經由 yaw 與位置的 cross-covariance 把 yaw 轉走
-        （我們實測在一次停等中被轉了 5.3\dg）。
-  \item \textbf{位置鎖定}（\code{zupt_hold}）：位置不加過程雜訊；$z$ 與傾角不混入 NDT。
+  \item \textbf{零速更新}：以速度為 0 作為 pseudo-measurement，並把陀螺儀均值當作 gyro bias 的觀測。
+  \item \textbf{凍結 yaw}：量測更新時，Kalman gain 的\emph{整列} yaw 設為 0。
+        只把 yaw 創新設為 0 是不夠的，位置創新會經由 yaw 與位置的 cross-covariance 把 yaw 轉走，
+        實測在一次停等中就轉了 5.3\dg。
+  \item \textbf{位置鎖定}：位置不加過程雜訊，$z$ 與傾角也不混入 NDT。
 \end{enumerate}
 
 \subsection{起步被誤判為靜止（Track2）}
-Track2 以穩定的 0.33~m/s$^2$ 小加速度起步，此時 window 內的標準差很小，只看標準差會把起步誤判為靜止，
-並把真實加速度當成 accelerometer bias，導致速度損失、全長發散（本地 $E$ 218--670）。我們為 Track2 加上兩個條件：
+Track2 以穩定的小加速度起步，此時 window 內的標準差很小，只看標準差會把起步誤判為靜止，
+並把真實加速度當成 accelerometer bias，導致速度損失、全長發散。我們為 Track2 加上兩個條件：
 \begin{itemize}
-  \item window 內加速度的\emph{均值}必須接近目前的 accelerometer bias（偏離超過 0.08~m/s$^2$ 就不算靜止）；
-  \item 靜止時對 accelerometer bias 做 pseudo-measurement（靜止時真實前向加速度為 0，量到的均值就是 bias）。
+  \item window 內加速度的\emph{均值}必須接近目前的 accelerometer bias，否則視為正在加減速，不算靜止；
+  \item 靜止時真實前向加速度為 0，所以量到的均值就是 bias，據此對 accelerometer bias 做 pseudo-measurement。
 \end{itemize}
-另外，把 accelerometer bias 的過程雜訊由 0.01 降為 0.002（Track2/3），NDT 縱向創新就不再被當成 bias，
+另外，降低 accelerometer bias 的過程雜訊（Track2/3），NDT 縱向創新就不再被當成 bias，
 解決了 Track3「太早轉彎」與轉彎後的橫縱向偏移。
 
 \subsection{結果數據分析}
@@ -391,13 +407,9 @@ ZUPT 開 & 0.67~m & 1.84~m  & $+0.7$\dg  & $-0.0041$~rad/s\\
 \end{tabular}
 \end{table}
 
-Track3 的 Kaggle 由 3.98 降到 2.46，但該版同時改了縮放比例（8.5$\to$7.5）與 gyro bias prior，不能全歸功於 ZUPT。
-降低 accelerometer bias 過程雜訊的版本在 public 分數沒有變化（皆為 2.01），因為差異出現在 private 區段（轉彎之後）；
-這部分我們以 RViz 人工目視確認。
-
 \subsection{考慮過但不採用的做法}
 曾嘗試在靜止時提高量測增益（floor 0.6），想讓量測有更多影響力，但在三個 track 都變差（表~\ref{tab:floor}），全部移除。
-Track1 同一版（含搜尋 xy 平移格與位置鎖定）的 Kaggle 由 1.56 退到 1.62，但本地 $E$ 卻由 1.79 變好為 1.7328，
+Track1 的 Kaggle 分數倒退，但本地 $E$ 卻變好，
 說明\textbf{本地 $E$ 會騙人}，必須同時看平滑度與 Kaggle。
 
 \begin{table}[H]
@@ -430,63 +442,49 @@ Track3 & 停等段路徑長 & 3.9~m $\to$ 22.6~m\\
 \end{itemize}
 所以\textbf{起步時必須有好的初始 yaw}。我們設計了三個互補的機制：初始位姿搜尋、牆面方向 prior、YawBank。
 
-\subsection{原創設計一：初始位姿搜尋}
-\textbf{目的}：不相信 \code{init_guess} 的航向，而是在第 0 幀對多個航向假設各做一次 NDT，讓地圖匹配決定初值。
-
-\textbf{做法}：
+\subsection{初始位姿搜尋}
+我們不相信 \code{init_guess} 的航向，而是在第 0 幀對多個航向假設各做一次 NDT，讓地圖匹配決定初值。
+搜尋的設計如下：
 \begin{enumerate}
-  \item 搜尋中心有兩個：\code{init_guess} 的 yaw，以及 IMU 內建姿態的絕對航向（兩者獨立；IMU 姿態不累積積分誤差）。
-  \item 以每個中心為準，在 $\pm30$\dg{} 內每 $5$\dg{} 取一個航向假設（每個中心 13 個）。
-  \item 對每個航向假設，可再疊加縱向$\times$橫向的平移格（\code{init_search_xy_offsets}）：
-        Track3 取 $\{0,\pm2\}\times\{0,\pm2\}$~m（9 格），共 $2\times13\times9=234$ 次 NDT；
-        Track1 只搜 yaw，共 26 次；Track2 關閉（原因見第~\ref{sec:C-yawbank} 節）。
-  \item 只改航向：在世界座標繞 $z$ 軸轉動，保留 \code{init_guess} 的 roll/pitch 與位置；
-        對收斂的結果取 probability 最大者，作為第 0 幀濾波器的初值，隨後仍以多起點 NDT 精修。
+  \item \textbf{搜尋中心}：有兩個，一個是 \code{init_guess} 的 yaw，另一個是 IMU 內建姿態的絕對航向。
+        兩者來源獨立，IMU 姿態也不累積積分誤差。
+  \item \textbf{航向假設}：以每個中心為準，在 $\pm30$\dg{} 內每 $5$\dg{} 取一個航向假設。
+  \item \textbf{平移格}：每個航向假設可再疊加縱向與橫向的平移格。Track3 使用 $3\times3$ 的格點，共 234 次 NDT；
+        Track1 只搜 yaw，共 26 次；Track2 不使用（見第~\ref{sec:C-yawbank} 節）。
+  \item \textbf{選擇}：只改航向，保留 \code{init_guess} 的 roll/pitch 與位置；
+        對收斂的結果取 probability 最大者作為第 0 幀濾波器的初值，之後仍以多起點 NDT 精修。
 \end{enumerate}
+搜尋範圍涵蓋了 \code{init_guess} 可能的誤差，因此能把起點帶進 NDT 的收斂範圍。
+但 probability 對 yaw 不敏感，所選航向本身並不精確，後續幀由陀螺儀與 NDT 持續修正。
+我們也試過改用 fitness 當選擇準則，兩者的軌跡在 Track3 約 60 幀後重合。
 
-\textbf{為何有效，以及限制}：搜尋範圍涵蓋了 \code{init_guess} 的可能誤差，所以能把起點帶進 NDT 的收斂範圍。
-但因為 probability 對 yaw 不敏感，搜尋選出的航向本身並不精確，後續幀由陀螺儀與 NDT 持續修正。
-我們也試過改用 fitness 當選擇準則，在 Track3 約 60 幀後兩者的軌跡重合。
-
-\subsection{原創設計二：地圖牆面方向 prior}
-\textbf{目的}：靜止時 NDT 無法鑑別 yaw。但建築牆面沿著道路方向排列，方向也許可以只靠地圖與 \code{init_guess} 的位置估計出來，
-\textbf{不需要影像點雲，也不使用 GNSS}。
-
-\textbf{做法}（\code{RoadHeadingPrior}）：
+\subsection{地圖牆面方向 prior}
+靜止時 NDT 無法鑑別 yaw，但建築牆面沿著道路方向排列，因此牆面方向可以只靠地圖與 \code{init_guess} 的位置估計出來，
+\textbf{不需要影像點雲，也不使用 GNSS}。估計分五步：
 \begin{enumerate}
-  \item 取 \code{init_guess} 位置周圍水平 30~m、高度在 $z_0-1$ 到 $z_0+6$~m 內的地圖點（$z_0$ 為起點位姿高度，
-        此範圍排除地面、保留牆面等垂直結構），投影成 0.5~m 解析度的俯視\emph{點密度影像}，單格計數上限 5（抑制過密格），
-        點數少於 200 則放棄。
-  \item 對影像做 5 點二項式模糊（$x$、$y$ 兩軸各一次），再以中央差分計算梯度。
-  \item 牆面的邊緣方向 $=$ 梯度方向 $+90$\dg；以梯度平方為權重，累積成 180 格（1\dg{} 一格）的方向直方圖
-        （模 180\dg），經 5 格平滑後取最大峰值，得到牆面主方向 $\theta_w$。
-  \item 直方圖只有 180\dg{} 週期，存在方向模糊：在 $\theta_w$ 與 $\theta_w+180$\dg{} 之中，
+  \item \textbf{點密度影像}：取 \code{init_guess} 位置周圍的地圖點，高度範圍排除地面、保留牆面等垂直結構，
+        投影成 0.5~m 解析度的俯視影像；單格計數設上限以抑制過密格，點數太少則放棄。
+  \item \textbf{梯度}：對影像做模糊後，以中央差分計算梯度。
+  \item \textbf{方向直方圖}：牆面的邊緣方向為梯度方向加 $90$\dg；以梯度平方為權重累積成方向直方圖，
+        平滑後取最大峰值，得到牆面主方向 $\theta_w$。
+  \item \textbf{解方向模糊}：直方圖只有 $180$\dg{} 週期，在 $\theta_w$ 與 $\theta_w+180$\dg{} 之中，
         取與 \code{init_guess} 的 yaw 較接近者。
-  \item 若與 \code{init_guess} 差超過 25\dg，視為此起點的牆面方向不可靠，放棄；否則以此方向取代起點 yaw。
+  \item \textbf{閘門}：與 \code{init_guess} 差超過 25\dg{} 時，視為牆面方向不可靠而放棄；否則以此方向取代起點 yaw。
 \end{enumerate}
-
-\textbf{適用範圍}：這個 prior 只適合當\emph{初始} yaw：沿整條軌跡的牆面方向誤差中位數為 3.0\dg／3.3\dg（Track1／Track2），
-路口有離群值（Track2 一處 47\dg），不適合當全程量測。Track3 的起點在紅燈路口，沒有清楚的街廓走廊，
-牆面方向不穩定（半徑 20/30/50~m 的主峰為 1.5/90.5/91.5\dg，皆不近 160--167\dg），因此 Track3 不啟用。
+這個 prior 只適合當\emph{初始} yaw：沿整條軌跡，牆面方向的誤差中位數約 3\dg，路口還有離群值，不適合當全程量測。
+Track3 的起點在紅燈路口，沒有清楚的街廓走廊，牆面方向會隨取樣半徑大幅跳動，因此不啟用。
 
 \subsection{YawBank：延後 yaw 的決定}\label{sec:C-yawbank}
-\textbf{問題}：Track2 靜止起步時，連牆面 prior 也只能把 yaw 修到約 $-4.3$\dg，
-而靜止時 NDT 無法判斷 yaw 對不對。
-
-\textbf{想法}：既然起步時無法判斷，就等車輛動起來、有視角變化後，再用地圖對齊的結果決定。
-
-\textbf{做法}：
+Track2 靜止起步時，連牆面 prior 也只能把 yaw 修到約 $-4.3$\dg，而靜止時 NDT 無法判斷 yaw 對不對。
+既然起步時無法判斷，我們就等車輛動起來、有視角變化後，再用地圖對齊的結果決定：
 \begin{enumerate}
-  \item 車速超過 1~m/s 後，以目前 yaw 為基準，建立 9 個 yaw 偏移（$-10$\dg 到 $+30$\dg，間隔 5\dg）的濾波器假設，
-        各自獨立執行預測與更新。
+  \item 車速超過 1~m/s 後，以目前 yaw 為基準，建立 9 個不同 yaw 偏移的濾波器假設，各自獨立執行預測與更新。
   \item 對每個假設累積 NDT fitness。
-  \item 150 幀後保留累積 fitness 最小的假設，丟棄其餘；在此之前，每一幀輸出目前最佳的假設（逐幀決定，仍是 causal）。
+  \item 150 幀後保留累積 fitness 最小的假設，丟棄其餘；在此之前，每一幀輸出目前最佳的假設，仍然是 causal。
 \end{enumerate}
-
-\textbf{適用範圍}：Track3 起步時各假設的 fitness 只差 2\%，無法鑑別，因此不採用；YawBank 只用在 Track2。
+Track3 起步時各假設的 fitness 只差 2\%，無法鑑別，因此 YawBank 只用在 Track2。
 
 \subsection{三種機制的分工與結果}
-表~\ref{tab:init} 列出各 track 的設定，表~\ref{tab:init-res} 是各機制的數據。
 
 \begin{table}[H]
 \centering\small
@@ -571,8 +569,8 @@ gyro bias 學習造成 & gyro bias 過程雜訊 $10^{-4}\to10^{-6}/10^{-8}$
 NDT 的 yaw 量測會被單側（左側）的垂直結構往逆時針拉，而且這個偏差\textbf{看起來很有把握}
 （候選分散度很小），所以放大不確定度（例如 yaw 多起點、依左右降權）都無效或更差。需要一個\textbf{獨立於 NDT 與縮放比例}的航向參考。
 
-\subsection{原創設計三：地圖軌跡線航向量測}
-\textbf{觀察}：地圖在相機高度有一層沿行駛軌跡的細長點雲，轉彎處也吻合，Track1--3 皆有（圖~\ref{fig:trail}）。
+\subsection{地圖軌跡線航向量測}
+地圖在相機高度有一層沿行駛軌跡的細長點雲，轉彎處也吻合，Track1--3 皆有（圖~\ref{fig:trail}）。
 我們沒有驗證其來源，直接把它當成地圖結構，用來約束\textbf{航向與橫向}。
 
 \begin{figure}[H]
@@ -583,12 +581,12 @@ NDT 的 yaw 量測會被單側（左側）的垂直結構往逆時針拉，而�
 \label{fig:trail}
 \end{figure}
 
-\textbf{做法}（\code{TrailHeading}）：每 3 幀、車輛非靜止且 NDT 收斂時，
+\code{TrailHeading} 每 3 幀、在車輛非靜止且 NDT 收斂時執行：
 \begin{enumerate}
-  \item 取車體前後 12~m、左右 3~m、高度在位姿 $z\pm0.5$~m 內的子地圖點，做 2D PCA；
-  \item 要求線夠細（短軸/長軸 $<0.25$）、夠長（$>6$~m）、至少 40 點；
-  \item 線方向（模 180\dg）取與目前 yaw 最接近者，若相差超過 12\dg{} 則放棄；
-  \item 以其相對 yaw 的差作為 yaw 的純量量測，$\sigma=1.5$\dg，做 Kalman 更新。
+  \item \textbf{取點}：取車體前後 12~m、左右 3~m、高度接近位姿 $z$ 的子地圖點，做 2D PCA。
+  \item \textbf{檢查}：要求這些點構成夠細、夠長、點數足夠的線。
+  \item \textbf{方向}：線方向（模 $180$\dg）取與目前 yaw 最接近者，相差超過 12\dg{} 則放棄。
+  \item \textbf{更新}：以線方向相對 yaw 的差作為 yaw 的純量量測，標準差 1.5\dg，做 Kalman 更新。
 \end{enumerate}
 靜止時不量測（yaw 本來就被凍結）。我們同時把 NDT 的 yaw 量測標準差由 2\dg{} 放寬為 4\dg，讓陀螺儀在 yaw 上更主導。
 
@@ -609,10 +607,6 @@ Kaggle public（Track3） & Kaggle & 2.01 $\to$ 1.87 $\to$ 1.74\\
 \end{tabularx}
 \end{table}
 
-軌跡線方向的準度與 NDT 的 yaw 誤差相當，且彼此獨立，所以加入後能修正 NDT 的偏差。
-限制是：對起步時已長出的 700--1000 幀殘餘只修回約 0.3--1.2\dg；殘餘的原因（NDT 被單側結構拉偏）本身沒有消除，
-只是被獨立的航向量測壓低。
-
 \subsection{考慮過但不採用的做法}
 \begin{table}[H]
 \centering\small
@@ -622,23 +616,18 @@ Kaggle public（Track3） & Kaggle & 2.01 $\to$ 1.87 $\to$ 1.74\\
 方案 & 結果 & 放棄原因\\
 \midrule
 停等時也量測軌跡線 & Kaggle 1.87 $\to$ 1.92；停等位置 yaw 被修到 $-1.1$\dg
-  & 過修約 1.5--1.8\dg\\
+  & 校正過頭約 1.5--1.8\dg\\
 軌跡線橫向推位置 & Kaggle 1.74 $\to$ 1.84；Track1 發散
   & 軌跡線的橫向位置不能當真值，只有方向可靠\\
 左右不平衡降權、依左右選用 yaw 量測 & 效果正負參半 & 沒有穩定的好處\\
 用地圖路面約束位姿 $z$ & 轉彎太晚、轉彎後偏右；fitness 由 0.253 變差為 0.337 & 約束 $z$ 不足以解決 pitch 問題\\
-固定前向縮放倍率 & 單幀診斷預期的改善在全長沒有重現 & 不採用\\
+固定前向縮放倍率 & 改善在全長沒有看到 & 不採用\\
 \bottomrule
 \end{tabularx}
 \end{table}
 
 %====================================================================
 \section{問題 E：缺乏全域參考——融入官方提供的 GNSS prior}\label{sec:E}
-
-\subsection{問題與使用原因}
-純相對的估計（IMU 加 NDT）誤差會隨時間累積。Track1/2 的 bag 內含官方提供的 GNSS 位姿，
-官方文件明文允許使用。\textbf{這是對現成資料的融合，不是我們的原創方法}。
-GNSS 提供全域的位置與航向，使位置誤差不再無限累積，yaw 也多了一個獨立的參考。
 
 \subsection{融合流程}
 圖~\ref{fig:gnss} 說明每個 GNSS 樣本如何進入 EKF。
@@ -678,21 +667,17 @@ GNSS 提供全域的位置與航向，使位置誤差不再無限累積，yaw �
 \toprule
 設計 & 原因\\
 \midrule
-只取時間戳不晚於影格的樣本 & 維持 causal，不使用未來資料\\
 外推到影格時間 & GNSS 樣本比影格早 $\Delta t$ 秒，車輛在這段時間內已經移動；用目前的速度與航向補償\\
 $\sigma$ 加入 $0.3\,v\,\Delta t$ & 外推本身有誤差，速度越快、時間差越長越不準；以速度的 30\% 計入量測不確定度\\
 每筆樣本只用一次 & GNSS 約每 7 幀才有一筆；重複使用同一筆會讓濾波器對它過度自信\\
-位置與航向分開更新 & 兩者可各自開關，方便做消融實驗\\
-第 0 幀與 YawBank 期間不套用 & 第 0 幀的初值由初始位姿搜尋或牆面 prior 決定；YawBank 的各假設彼此獨立，GNSS 會偏袒其中一個\\
+第 0 幀與 YawBank 期間不使用 & 第 0 幀的初值由初始位姿搜尋或牆面 prior 決定；YawBank 的各假設彼此獨立\\
 \bottomrule
 \end{tabularx}
 \end{table}
 
 \subsection{結果數據分析}
 $\sigma_{xy}=0.7$~m 與航向 $\sigma=2$\dg{} 為我們選定的權重（GNSS 本身雜訊約 0.7~m、固定偏移約 0.5~m）。
-表~\ref{tab:gnss} 是 Kaggle public 的消融：位置資訊貢獻大部分改善；yaw 單獨使用幫助較小，
-但對 Track2 靜止起步的 yaw 有效（前 300 幀的 yaw 平均被拉動約 5\dg）。
-由於 GNSS 同時是本地評估的參考，啟用 GNSS 的版本對 GNSS 的本地 $E$ 是循環的，只引用 Kaggle 分數。
+位置資訊貢獻大部分改善；yaw 單獨使用幫助較小，但對 Track2 靜止起步的 yaw 有效。
 
 \begin{table}[H]
 \centering\small
@@ -711,11 +696,6 @@ Track2 & 1.46 & 0.78 & 1.38 & \textbf{0.77}\\
 \section{結果}
 
 \subsection{三個 track 的分數變化}
-圖~\ref{fig:progress} 把三個 track 的 Kaggle public 分數隨開發步驟的變化畫在同一張圖上（越低越好），
-每個步驟的內容見表~\ref{tab:steps}。各 track 的開發步驟數不同，所以 x 軸是步驟編號，而不是共同的時間軸。
-Track1/2 的起點已接近或低於 baseline，主要改善來自 GNSS prior；
-Track3 沒有 GNSS，起點的分數最高，改善來自 ZUPT 與縮放比例調整、初始位姿搜尋與軌跡線航向量測，
-所以分數的下降幅度最大、步驟也最多。
 
 \begin{figure}[H]
 \centering
@@ -771,11 +751,10 @@ GNSS prior & E & Track1 1.52 $\to$ 1.13；Track2 1.46 $\to$ 0.77 & Kaggle\\
 %====================================================================
 \section{尚未解決的問題}
 Track3 的 public 分數 1.74 仍高於 public baseline 1.29。由於 Track3 沒有真值，我們無法直接確認剩餘誤差的來源。
-診斷結果顯示，橫向偏差與停等位置的縱向偏差對分數的貢獻都很小，因此我們推測，剩餘的誤差主要來自行駛段的縱向與 yaw；
-這是推論，尚未驗證。
+診斷結果顯示，橫向偏差與停等位置的縱向偏差對分數的貢獻都很小，因此我們推測，剩餘的誤差主要來自行駛段的縱向與 yaw。
 
-另一個已確認但尚未解決的現象是：轉彎後位姿的 $z$ 偏高約 0.5--0.9~m，pitch 偏向鼻朝下。
-我們只用地圖路面約束 $z$，結果不足以解決，仍需要同時約束 pitch。
+另一個已確認但尚未解決的現象是：轉彎後位姿的 $z$ 偏高約 0.5--0.9~m，pitch 偏向車頭朝下。
+我們只用地圖路面約束 $z$，結果不足以解決，推測需要同時約束 pitch。
 
 %====================================================================
 \section{Workload Distribution}

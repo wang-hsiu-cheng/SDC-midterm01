@@ -711,7 +711,8 @@ Track2 & 1.46 & 0.78 & 1.38 & \textbf{0.77}\\
 \section{結果}
 
 \subsection{三個 track 的分數變化}
-圖~\ref{fig:progress} 同時呈現三個 track 的 Kaggle public 分數隨版本的變化（越低越好）。
+圖~\ref{fig:progress} 把三個 track 的 Kaggle public 分數隨開發步驟的變化畫在同一張圖上（越低越好），
+每個步驟的內容見表~\ref{tab:steps}。各 track 的開發步驟數不同，所以 x 軸是步驟編號，而不是共同的時間軸。
 Track1/2 的起點已接近或低於 baseline，主要改善來自 GNSS prior；
 Track3 沒有 GNSS，起點的分數最高，改善來自 ZUPT 與縮放比例調整、初始位姿搜尋與軌跡線航向量測，
 所以分數的下降幅度最大、步驟也最多。
@@ -719,10 +720,27 @@ Track3 沒有 GNSS，起點的分數最高，改善來自 ZUPT 與縮放比例�
 \begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth]{figures/all_tracks_progress.png}
-\caption{三個 track 的 Kaggle public 分數變化。實心為主線採用的版本，空心為支線試驗、未採用；
-虛線為 baseline（Track3 為 public baseline；最終版本的 private 分數為 1.36，baseline 為 1.40）。}
+\caption{三個 track 的 Kaggle public 分數變化（只畫主線採用的版本；虛線為各 track 的 baseline，
+Track3 為 public baseline）。Track3 最終版本的 private 分數為 1.36，private baseline 為 1.40。}
 \label{fig:progress}
 \end{figure}
+
+\begin{table}[H]
+\centering\small
+\caption{圖~\ref{fig:progress} 各開發步驟的內容（每一步都在前一步的基礎上累加）}\label{tab:steps}
+\begin{tabularx}{\linewidth}{@{}cYYY@{}}
+\toprule
+步驟 & Track1 & Track2 & Track3\\
+\midrule
+1 & 共同基礎（1.56） & 收斂版 + 牆面方向 prior、yaw 量測 $\sigma=4$\dg（1.46） & 舊版：縮放比例 8.5、無 ZUPT（3.98）\\
+2 & 只搜 yaw 的初始位姿搜尋（1.62） & + GNSS prior（0.77） & 縮放比例 7.5 + ZUPT（2.46）\\
+3 & + yaw 量測 $\sigma=4$\dg（1.52） & & + 初始位姿搜尋 + 靜止時凍結 yaw（2.01）\\
+4 & + GNSS prior（1.13） & & + accelerometer bias 過程雜訊 0.002（2.01）\\
+5 & & & + 地圖軌跡線航向量測（1.87）\\
+6 & & & + yaw 量測 $\sigma=4$\dg、較強的軌跡線量測（1.74）\\
+\bottomrule
+\end{tabularx}
+\end{table}
 
 \subsection{各方案的效益摘要}
 \begin{table}[H]

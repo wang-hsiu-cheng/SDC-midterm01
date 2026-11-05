@@ -1,26 +1,35 @@
 % SDC 2026 Midterm01 -- Localization report
 % Build (XeLaTeX + ctex; run twice for references):
 %   cd midterm01/report && xelatex localization_report.tex && xelatex localization_report.tex
-\documentclass[11pt,a4paper]{ctexart}
+% Fonts: kaiu.ttf (DFKai-SB) must be installed on the machine that compiles.
+\documentclass[11pt, a4paper]{article}
 
-\usepackage[margin=2.4cm]{geometry}
+% --- 必要套件 ---
+\usepackage[margin=2.5cm]{geometry}
 \usepackage{graphicx}
-\usepackage{booktabs}
-\usepackage{tabularx}
-\usepackage{array}
-\usepackage{amsmath}
-\usepackage{float}
-\usepackage{caption}
-\usepackage{enumitem}
 \usepackage{xcolor}
 \usepackage{listings}
-\usepackage[hidelinks]{hyperref}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{xeCJK}
+\usepackage{hyperref}
+% 本報告額外使用
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+
+\setCJKmainfont[AutoFakeBold=2.5]{kaiu.ttf}
+\setCJKsansfont[AutoFakeBold=2.5]{kaiu.ttf}
 
 \graphicspath{{../slides_figs_en/}}
 
-\captionsetup{font=small,labelfont=bf}
+% --- 設定圖片標題文字置中集中，不左右分散 ---
+\captionsetup[figure]{justification=centering}
+
 \setlist{itemsep=2pt,topsep=4pt,parsep=0pt}
-\setlength{\parskip}{3pt}
 \renewcommand{\arraystretch}{1.15}
 
 % inline code; \detokenize keeps underscores and braces literal
@@ -28,16 +37,54 @@
 \newcommand{\dg}{$^{\circ}$}
 \newcolumntype{Y}{>{\raggedright\arraybackslash}X}
 
-\lstset{
-  basicstyle=\ttfamily\footnotesize,
-  breaklines=true,
-  columns=fullflexible,
-  frame=single,
-  framerule=0.3pt,
-  rulecolor=\color{black!30},
-  xleftmargin=2pt,
-  xrightmargin=2pt
+% --- 程式碼區塊樣式設定 ---
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.96,0.96,0.96}
+
+\lstdefinestyle{bashstyle}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{blue},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=none,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    frame=single,
+    rulecolor=\color{black!20}
 }
+
+\lstdefinestyle{cppstyle}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{blue},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=none,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    frame=single,
+    rulecolor=\color{black!20},
+    language=C++
+}
+
+\lstset{style=bashstyle}
 
 \title{SDC 2026 Midterm01 Localization 報告\\[2pt]
 \large 影像點雲對 LiDAR 地圖的 Causal 定位}

@@ -107,6 +107,9 @@ NDT 多起點對齊的候選經加權融合後作為量測，並針對
 三個 track 的 Kaggle 成績如表~\ref{tab:summary}：Track1/2 通過 baseline，Track3 的 private 分數通過 baseline。
 \end{abstract}
 
+% TODO: 將下方的 YOUTUBE_VIDEO_ID 換成實際的 YouTube 影片連結
+\noindent\textbf{Demo 影片}：\href{https://www.youtube.com/watch?v=YOUTUBE_VIDEO_ID}{https://www.youtube.com/watch?v=YOUTUBE\_VIDEO\_ID}
+
 \begin{table}[H]
 \centering\small
 \caption{三個 track 的最終成績}\label{tab:summary}
@@ -284,9 +287,8 @@ R=\max\!\left(1,\ \frac{d^2}{\chi^2_{\mathrm{th}}}\right)\bigl(R_{\mathrm{base}}
 \end{tabularx}
 \end{table}
 
-基準雜訊是手動調整的保守值：實測 NDT 創新（量測與預測之差）比它小，
+基準雜訊是手動調整的保守值：實測 NDT 量測與預測之差比它小，
 但設得太小會讓濾波器過度相信 NDT 而失控，因此刻意放大。
-離群量測不丟棄，是因為預測錯誤時，仍需要量測把狀態逐步拉回。
 更新後，$x,y,\psi$ 取濾波結果，roll/pitch 與 $z$ 則以固定增益向 NDT 結果靠攏。
 
 \subsection{IMU 預測}
@@ -437,8 +439,7 @@ Track3 & 停等段路徑長 & 3.9~m $\to$ 22.6~m\\
   \item 單幀 NDT 的 probability 對 yaw 的變化很不敏感：在第 0 幀，把 yaw 在一段範圍內（Track3 約 13\dg）改變，
         probability 幾乎不變（Track1 的範圍更大，Track2 幾乎不變）。因此單幀 probability 最大值的位置主要受雜訊影響，
         不能直接當成正確航向。Track2 的車輛靜止起步，沒有視角變化，更是如此。
-  \item 因果性不允許事後修正前面的輸出，而 yaw 每度折合 0.2：Track2 的 yaw 誤差幾乎全集中在第 0--300 幀
-        （平均 $-13.8$\dg），只佔 9\% 的幀，卻貢獻幾乎整個 yaw RMS（約 4.2\dg）。
+
 \end{itemize}
 所以\textbf{起步時必須有好的初始 yaw}。我們設計了三個互補的機制：初始位姿搜尋、牆面方向 prior、YawBank。
 
@@ -544,7 +545,6 @@ Track3 修正了停等與起步後，仍有一個約 $+5$\dg{} 的航向殘餘�
 逆時針偏約 10\dg，轉彎「太早、偏左約 3~m」。航向偏 8\dg{} 以上、以 3--5~m/s 行駛 4 秒，橫向就會偏移 2--3~m。
 
 \subsection{原因}
-我們逐一檢驗可能的原因（表~\ref{tab:hyp}）：
 
 \begin{table}[H]
 \centering\small
@@ -566,7 +566,7 @@ gyro bias 學習造成 & gyro bias 過程雜訊 $10^{-4}\to10^{-6}/10^{-8}$
 \end{tabularx}
 \end{table}
 
-NDT 的 yaw 量測會被單側（左側）的垂直結構往逆時針拉，而且這個偏差\textbf{看起來很有把握}
+NDT 的 yaw 量測會被左側的垂直結構往逆時針拉，而且這個偏差\textbf{看起來很有把握}
 （候選分散度很小），所以放大不確定度（例如 yaw 多起點、依左右降權）都無效或更差。需要一個\textbf{獨立於 NDT 與縮放比例}的航向參考。
 
 \subsection{地圖軌跡線航向量測}

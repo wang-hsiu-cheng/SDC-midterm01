@@ -1,0 +1,429 @@
+% SDC 2026 Midterm01 -- Localization report
+% Build (XeLaTeX + ctex; run twice for references):
+%   cd midterm01/report && xelatex localization_report.tex && xelatex localization_report.tex
+\documentclass[11pt,a4paper]{ctexart}
+
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage[hidelinks]{hyperref}
+
+\graphicspath{{../slides_figs_en/}}
+
+\captionsetup{font=small,labelfont=bf}
+\setlist{itemsep=2pt,topsep=4pt,parsep=0pt}
+\setlength{\parskip}{3pt}
+\renewcommand{\arraystretch}{1.15}
+
+% inline code; \detokenize keeps underscores and braces literal
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\dg}{$^{\circ}$}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  framerule=0.3pt,
+  rulecolor=\color{black!30},
+  xleftmargin=2pt,
+  xrightmargin=2pt
+}
+
+\title{SDC 2026 Midterm01 Localization 報告\\[2pt]
+\large 影像點雲對 LiDAR 地圖的 Causal 定位}
+\author{第 7 組\quad 王修呈（a151527）}
+\date{2026 年 11 月}
+
+\begin{document}
+\maketitle
+
+%--------------------------------------------------------------------
+\begin{abstract}
+本作業以 LoGeR 由前鏡頭影像產生的點雲（\code{raw_ply}）對預建的 LiDAR 地圖
+（\code{map.pcd}）做 scan matching，估計每個影像幀的車輛位姿。我們自行設計了一條
+\emph{causal} 的管線：NDT 多起點對齊與候選軟加權融合，餵給由 IMU 驅動的 7 狀態
+EKF（含零速更新 ZUPT），再依各 track 的特性以 yaml 開關外加量測——GNSS 先驗
+（Track1/2）、牆面方向先驗與 YawBank（Track2）、地圖軌跡線航向量測（Track3）。
+三個 track 的 Kaggle 成績如表~\ref{tab:summary}，皆通過 baseline。
+本報告說明管線、原創貢獻、問題與解法，以及失敗的嘗試。
+\end{abstract}
+
+\begin{table}[H]
+\centering\small
+\caption{三個 track 的正式版與 Kaggle 成績}\label{tab:summary}
+\begin{tabularx}{\linewidth}{@{}llcccY@{}}
+\toprule
+Track & 權重 $r$ & 正式版 & Kaggle & Baseline & 結果\\
+\midrule
+Track1 & 0.3 & \code{gb}（GNSS xy+yaw） & \textbf{1.13} & 1.79 & 通過\\
+Track2 & 0.3 & \code{g2b}（GNSS xy+yaw） & \textbf{0.77} & 1.92 & 通過\\
+Track3 & 0.4 & \code{p5}（軌跡線航向） & public \textbf{1.74}／private \textbf{1.36}
+       & public 1.29／private 1.40 & public 未達；private 通過\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+%--------------------------------------------------------------------
+\section{Pipeline：程式如何運作}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{m2_architecture.png}
+\caption{整體管線。同一條管線，各 track 以 yaml 開啟自己的外加模組（虛線＝僅該 track 啟用）。}
+\label{fig:arch}
+\end{figure}
+
+\subsection{資料與問題設定}
+\begin{itemize}
+  \item \textbf{輸入}：每幀約 15k--41k 點的 PLY（$x$ 前、$y$ 左、$z$ 上，\textbf{沒有絕對尺度}）、
+        ASCII 地圖（約 57--60 M 點）、帶雜訊的 \code{init_guess.txt}、bag 內約 100~Hz 的 IMU；
+        Track1/2 另有約 4~Hz 的 GNSS。
+  \item \textbf{輸出}：每幀 $T_{\text{map}\leftarrow\text{body}}$，再轉成 Kaggle 的 \code{idx,x,y,yaw}。
+  \item \textbf{評分}：
+        $E=\sqrt{\tfrac1N\sum\lVert\Delta p\rVert^2}+0.2\sqrt{\tfrac1N\sum\Delta\theta^2}$，
+        $\Delta p$ 單位為 m、$\Delta\theta$ 單位為度；yaw 的 RMS 每度折合 0.2。
+\end{itemize}
+
+\subsection{處理流程}
+\begin{enumerate}
+  \item \textbf{前處理}：點雲乘上各 track 的尺度（Track1/2/3 為 8.5/8.7/7.5），保留 30~m 內的點並以
+        0.5~m 體素降採樣（抑制遠處單目深度誤差）。地圖先離線降採樣成 binary 快取（\code{map_modified}）。
+  \item \textbf{NDT 多起點}：以 EKF 預測為中心，縱向偏移 $0,\pm1.5,\pm3$~m 各對齊一次（NDT 解析度 3~m）。
+        縱向是影像點雲最難觀測的方向（候選縱向分散的中位數為 1.13~m）。
+  \item \textbf{候選軟加權融合}：以 probability 對各候選軟加權，並將\textbf{候選分散度放進量測協方差 $R$}，
+        縱向不確定時量測自然被降權。
+  \item \textbf{7 狀態 EKF}：狀態為
+        $\mathbf{x}=[x,\,y,\,\psi,\,v,\,b_g,\,\beta,\,b_a]^{\top}$，即位置、航向、速度、陀螺儀零偏、
+        行進偏角與加速度零偏。以 IMU 做 causal 預測；離群量測只放大 $R$、不丟棄，避免舊版
+        「整幀被拒、速度被拉低、鎖死」的發散。
+  \item \textbf{ZUPT}：靜止時釘住速度與零偏、凍結 yaw、位置不加過程雜訊、傾角不混入 NDT。
+  \item \textbf{各 track 外加量測}（第~\ref{sec:contrib} 節）：GNSS 先驗、牆面方向先驗與 YawBank、
+        地圖軌跡線航向。
+  \item \textbf{輸出}：每幀寫出一行位姿，不做任何事後處理；轉換腳本只做格式轉換。
+\end{enumerate}
+
+\subsection{規則遵守}
+\begin{itemize}
+  \item \textbf{Causal}：第 $k$ 幀只用第 $0..k$ 幀的 PLY。GNSS 只取時間戳不晚於影格時間的樣本，
+        位置以濾波器速度外推到影格時間，每筆只使用一次。
+  \item \textbf{無後處理、無 leaderboard probing}：Kaggle 分數只用來比較方法與設定，沒有用來反推誤差
+        再修正軌跡；\code{l2}（軌跡線橫向推）失敗後即捨棄。
+  \item \textbf{GNSS}：官方文件明文允許，僅用於 Track1/2（Track3 的 bag 沒有 GNSS）。
+        Track2 地圖中意外遺留的 \code{tl}/\code{th} 欄位完全沒有使用。
+  \item \textbf{可重現}：每個 track 有一份完整的 yaml
+        （\code{config/localization_params_TrackN.yaml}，N 為 1、2、3）；以純 yaml 全長重跑的結果與正式結果檔
+        \textbf{逐位元相同}（Track1/2：\code{v1c}/\code{v2c}；Track3：\code{y5}）。
+\end{itemize}
+
+%--------------------------------------------------------------------
+\section{Contributions：原創想法與改進}\label{sec:contrib}
+
+\subsection{ZUPT 與靜止鎖定}
+Track3 在約第 900--2200 幀停紅燈。沒有 ZUPT 時，停等期間位置與 yaw 持續漂移，
+陀螺儀零偏被 NDT 量測拉離靜止時的實測值（圖~\ref{fig:zupt}）。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\linewidth]{b2_zupt.png}
+\caption{Track3 紅燈停等（第 948--2179 幀；位移與 yaw 皆相對停等起點）。
+ZUPT 關（灰）時位移與 yaw 持續漂移、零偏被帶走；ZUPT 開（綠）時零偏穩定在靜止窗口估得的 $-0.0041$~rad/s。}
+\label{fig:zupt}
+\end{figure}
+
+\textbf{做法}：零速量測、陀螺儀零偏觀測與先驗（$-0.004$）、\code{zupt_freeze_yaw}
+（卡爾曼增益的 yaw 列歸零，避免位置創新經交叉協方差轉動 yaw）、\code{zupt_hold}。
+
+\textbf{證據}：表~\ref{tab:zupt} 為第 948--2179 幀（約 1230 幀）的比較；``ZUPT 關''
+為 \code{p5} 設定加上 \code{-p zupt_enabled:=false}（run \code{zoff3}），``ZUPT 開'' 為現行 \code{p5}。
+零偏 $-0.0041$ 與靜止窗口估得的值一致。Track3 的 Kaggle 由 3.98 降到 2.46，但該版同時改了
+\code{ply_scale}（8.5$\to$7.5）與陀螺儀零偏先驗，不能全歸功於 ZUPT。
+
+\begin{table}[H]
+\centering\small
+\caption{Track3 停等段（第 948--2179 幀）ZUPT 開關比較}\label{tab:zupt}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+ & 末端位移 & 停等段路徑長 & yaw 變化 & 第 2179 幀陀螺零偏\\
+\midrule
+ZUPT 關（\code{zoff3}） & 6.82~m & 18.01~m & $-45.6$\dg & $+0.0099$~rad/s\\
+ZUPT 開（\code{p5}）    & 0.67~m & 1.84~m  & $+0.7$\dg  & $-0.0041$~rad/s\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{NDT 多起點、候選軟加權與分散度進 $R$}
+單一起點取 probability 最大者會在不同模式間翻轉（Track1 本地 $E=3.88$）。改成多起點軟加權，並把候選分散度當作
+不確定度放進 $R$ 後，Track1 本地 $E$ 由 1.99 降到 1.79。另一種做法——只調 $Q/R$ 的「一致性校準」——
+得到 $E=9.49/2.00/1.91$，不如軟加權；原因是 NDT 的量測誤差在時間上相關，單靠調整雜訊參數無法同時
+「誠實」又更準。
+
+\subsection{地圖軌跡線航向量測（TrailHeading）}
+\textbf{觀察}：地圖在相機高度有一層沿建圖車行駛軌跡的細長點雲，轉彎處也吻合，Track1--3 皆有（圖~\ref{fig:trail}）。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{fig07_trail_heading.png}
+\caption{左：相機高度的地圖點沿建圖車軌跡形成細線（綠線為 \code{p5} 輸出）；
+右：每次量測相對預測的航向修正量（停等時不量測）。}
+\label{fig:trail}
+\end{figure}
+
+\textbf{做法}：取位姿高度 $\pm0.5$~m、前後 12~m、左右 3~m 內的圖層點做 2D PCA 線擬合；
+要求線夠細、夠長（$>6$~m）、至少 40 點，且方向與目前 yaw 相差不超過 $12$\dg（模 $180$\dg）。
+線方向當作 yaw 量測（$\sigma=1.5$\dg、每 3 幀一次、靜止時不量測）。此量測\textbf{只約束航向，不約束縱向}，
+因此避開影像點雲最弱的方向，且與點雲尺度無關。
+
+\textbf{離線驗證}（Track1/2，對 GNSS）：線方向與車頭夾角的中位數為 0.8\dg；
+``線方向加 yaw 誤差'' 的 RMS 為 1.95\dg/2.10\dg，與 NDT yaw 誤差（2.27\dg/3.03\dg）相當，
+且獨立於尺度。
+
+\textbf{證據}：紅燈結束時的突然逆時針偏轉由 $+4.1$\dg 降到 $+0.5$\dg；Track3 Kaggle
+\code{ba2} 2.01 $\to$ \code{bt1} 1.87 $\to$ \code{p5} 1.74。
+
+\subsection{GNSS 先驗（GnssPrior，Track1/2）}
+\textbf{做法}：讀取 bag 中的 GNSS，位置以濾波器速度與航向外推到影格時間，量測標準差為
+\[
+\sigma=\sqrt{\sigma_{xy}^{2}+(0.3\,v\,\Delta t)^{2}},\qquad \sigma_{xy}=0.7~\text{m},\ \sigma_{\text{yaw}}=2^{\circ},
+\]
+其中 $v$ 為濾波器速度、$\Delta t$ 為 GNSS 樣本相對影格的時間差；每筆只用一次（causal）。
+此功能預設關閉，逐 track 以 yaml 啟用。表~\ref{tab:gnss} 為 Kaggle public 的消融：位置資訊貢獻大部分改善；
+yaw 單獨使用幫助較小，但對 Track2 靜止起步的 yaw 有效（前 300 幀的 yaw 平均被拉動約 5\dg）。
+
+\begin{table}[H]
+\centering\small
+\caption{GNSS 先驗消融（Kaggle public）}\label{tab:gnss}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+ & 無 GNSS & 只用 xy & 只用 yaw & xy + yaw\\
+\midrule
+Track1 & 1.52 & 1.17 & 1.47 & \textbf{1.13}\\
+Track2 & 1.46 & 0.78 & 1.38 & \textbf{0.77}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Track2：從發散到收斂}\label{sec:track2}
+Track2 以穩定的 0.33~m/s$^2$ 加速度起步，被誤判為靜止，真實加速度被當成零偏，
+造成速度損失與全長發散（本地 $E$ 218--670）。解法如下。
+\begin{itemize}
+  \item \textbf{ZUPT 加條件}：窗口加速度均值必須接近 $b_a$ 才算靜止，並在靜止時對 $b_a$ 做偽量測。
+  \item \textbf{YawBank}：車速超過 1~m/s 後，以 9 個 yaw 偏移各跑一份濾波器，150 幀後以 fitness 承諾其中一個
+        （本地 $E$ 約 200 降到 2.27）。
+  \item \textbf{釘住行進偏角 $\beta$}、\code{ply_scale} 設為 8.7。
+  \item \textbf{牆面方向先驗（\code{RoadHeadingPrior}）}：第 0 幀以地圖牆面主方向
+        （點密度影像的梯度方向直方圖主峰；$180$\dg 的模糊由 \code{init_guess} 解開）修正靜止起步的 yaw，
+        差距超過 $25$\dg 則放棄。Track2 本地 $E$ 由 2.277 降到 1.751（yaw RMS 4.57\dg$\to$2.91\dg）。
+        Track2 的 yaw 誤差幾乎全在第 0--300 幀，而因果性不允許事後修正，所以起步 yaw 必須一開始就好。
+\end{itemize}
+
+\subsection{其他採用的設計}
+\begin{itemize}
+  \item \textbf{第 0 幀初始位姿搜尋}：以 \code{init_guess} 與 IMU 姿態 yaw 為中心，在 $\pm30$\dg 內每 $5$\dg 搜尋，
+        以 NDT probability 選最佳。Track3 的 \code{init_guess} yaw 偏差約 $21.5$\dg，此步驟（連同靜止時凍結 yaw）
+        使 Kaggle 由 2.46 降到 2.01。Track1 只搜 yaw：xy 偏移格會把起點移偏，前 300 幀對 GNSS 的 RMS 由 1.49 增為 2.16。
+  \item \textbf{加速度零偏過程雜訊 0.01$\to$0.002}（Track2/3）：NDT 縱向創新不再被當成 $b_a$，
+        解決 Track3「太早轉彎」與轉彎後的橫縱向偏移（以 RViz 人工目視確認；差異出現在 private 區段，
+        public 分數不變）。
+  \item \textbf{\code{meas_sigma_yaw_deg} 由 2 改為 4}：讓陀螺儀在 yaw 上更主導；Track1 Kaggle 1.62$\to$1.52。
+\end{itemize}
+
+\subsection{診斷工具}
+為了找出根因，我們另寫了診斷工具：\code{matcher_bench}（固定位姿掃尺度與起點、\code{--eval_only}
+對齊分數、左右分離、距離分段）、\code{ndt_bench.py}（單幀收斂率與準度）、\code{analyze_diag.py}、
+\code{decompose_yaw.py}、\code{pose_vs_imu_attitude.py}、\code{eval_ate.py}，以及在一次性容器中執行並記錄
+manifest 的 \code{run_track.sh}/\code{sweep.sh}/\code{docker_run.sh}（每個 run 的差異只來自列出的 \code{-p} 覆寫）。
+
+%--------------------------------------------------------------------
+\section{結果}
+
+\subsection{Track3 的分數演進}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{fig08_track3_progress.png}
+\caption{Track3 Kaggle public 分數演進。實心為主線採用的版本，空心為支線試驗（\code{ba05}、\code{b3}、\code{p1s4}、\code{l2}）、未採用。}
+\label{fig:t3}
+\end{figure}
+
+\subsection{各 track 版本對照（Kaggle public）}
+\begin{table}[H]
+\centering\small
+\caption{各版本相對父版本的新增項目與 Kaggle 分數}\label{tab:versions}
+\begin{tabularx}{\linewidth}{@{}llYc@{}}
+\toprule
+Track & 版本 & 新增 & Kaggle\\
+\midrule
+T1 & \code{5597dfe} & 共同基礎 & 1.56\\
+T1 & \code{047f72a} & +floor 0.6、搜 xy 格 & 1.62（退步）\\
+T1 & \code{rhp1s4} & 只搜 yaw、$\sigma_{\text{yaw}}=4$ & 1.52\\
+T1 & \textbf{\code{gb}} & +GNSS xy+yaw & \textbf{1.13}\\
+\midrule
+T2 & \code{rhp2} & 收斂版+牆面先驗、$\sigma_{\text{yaw}}=4$ & 1.46\\
+T2 & \textbf{\code{g2b}} & +GNSS xy+yaw & \textbf{0.77}\\
+\midrule
+T3 & 舊版 & scale 8.5、無 ZUPT & 3.98\\
+T3 & \code{257c97c} & scale 7.5+零偏先驗+ZUPT & 2.46\\
+T3 & \code{6e289ca} & +初始位姿搜尋+靜止凍結 yaw & 2.01\\
+T3 & H2（\code{f81f508}） & +hold+floor 0.6（floor 後來移除） & 1.93\\
+T3 & \code{bt1} & +$b_a$ 雜訊 0.002+TrailHeading & 1.87\\
+T3 & \code{p1s4} & \code{bt1}+$\sigma_{\text{yaw}}=4$ & 1.85\\
+T3 & \textbf{\code{p5}} & +$\sigma_{\text{yaw}}=4$+軌跡線 $\sigma=1.5$\dg、每 3 幀
+   & \textbf{1.74}（private 1.36）\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{本地評估的限制}
+\begin{itemize}
+  \item GNSS 只有約 4~Hz、雜訊約 0.7~m、固定偏移約 0.5~m，分不出 0.05--0.17 的差距與逐幀抖動；
+        本地 $E$ 與 Kaggle 的方向曾經相反（Track1：本地 1.79$\to$1.7328，Kaggle 1.56$\to$1.62）。
+        因此調參時同時看平滑度（位置二階差）。啟用 GNSS 先驗的版本，對 GNSS 的本地 $E$ 是循環的，
+        只引用 Kaggle 分數。
+  \item Track3 沒有真值也沒有 GNSS；public 只評約第 157--1257 幀，轉彎（約 2400--2800 幀）落在 private，
+        只能靠 RViz 人工目視判斷。
+\end{itemize}
+
+%--------------------------------------------------------------------
+\section{Problems and Solutions}
+
+\subsection{縱向可觀測性差、NDT 誤差在時間上相關}
+\textbf{問題}：影像點雲的縱向分散中位數為 1.13~m，NDT 單幀只能把誤差往真值拉約 19\%；
+累積多幀點雲（$K=4/10$，本地 $E=1.94/487$）與調整 $Q/R$ 都無法補救。
+
+\textbf{解法}：速度唯一可靠的來源是 IMU 加速度積分，因此投入 ZUPT 與加速度零偏估計；
+NDT 的縱向不確定度透過候選分散度進入 $R$。
+
+\subsection{Track2 發散}
+\textbf{問題}：以穩定小加速度起步被誤判為靜止（見第~\ref{sec:track2} 節）。
+\textbf{解法}：窗口加速度均值條件與 $b_a$ 偽量測、YawBank、釘住 $\beta$。
+
+\subsection{提高增益的 floor 補丁是死路}
+\textbf{現象}：Track1 逐幀抖動變為 2.9 倍（floor 0.6 版）；Track2 本地 $E$ 由 2.27 升到 16.96；
+Track3 靜止段路徑長由 3.9~m 升到 22.6~m。Track1 同一版（\code{047f72a}）另含搜 xy 格與 hold，
+Kaggle 由 1.56 退到 1.62，無法單獨歸因於 floor。
+
+\textbf{解法}：全部關閉並移除。教訓是\textbf{本地 $E$ 會騙人}（Track1 本地 $E$ 由 1.79 變好為 1.7328，
+Kaggle 卻變差），必須同時看平滑度與 Kaggle。
+
+\subsection{Track3 的 \texorpdfstring{$+5$\dg}{+5度} 航向殘餘}
+人工目視發現：紅燈結束後航向比 LiDAR 逆時針偏約 $10$\dg，轉彎「太早、偏左約 3~m」。
+我們逐一檢驗假說（表~\ref{tab:hyp}）。
+
+\begin{table}[H]
+\centering\small
+\caption{Track3 航向殘餘的假說檢驗}\label{tab:hyp}
+\begin{tabularx}{\linewidth}{@{}lYY@{}}
+\toprule
+假說 & 檢驗 & 結論\\
+\midrule
+零偏學習造成 & \code{process_sigma_bias} $10^{-4}\to10^{-6}/10^{-8}$
+  & \textbf{否定}：紅燈位置 yaw 只差 0.1\dg\\
+起步瞬間增益太大 & 起步後降權 yaw 量測
+  & \textbf{否定}：只延後，NDT 本來就要求 168--170\dg\\
+尺度造成 & 尺度掃描 6.5--9.5
+  & 停等偏移來自尺度（\code{zupt_hold} 擋住是對的）；\textbf{轉彎偏移與尺度無關}\\
+點雲前傾 & 位姿與點雲地面 pitch 比較 & 行駛段位姿與點雲相符\\
+左側結構拉偏 NDT yaw & 左右分離 NDT
+  & \textbf{支持（推論，因果未驗證）}：紅燈位置左半 $+5\sim6$\dg、右半 $+1\sim2$\dg；
+    左側結構在第 700 幀進入視野，與 $+4$\dg 的形成窗口吻合；參考為 IMU 姿態與軌跡線，皆非真值\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\textbf{解法（部分）}：地圖軌跡線航向量測獨立於 NDT 與尺度，修掉紅燈結束（起步）時的突然偏轉
+（$+4.1$\dg$\to+0.5$\dg）；但對第 700--1000 幀已長出的殘餘只修回約 0.3--1.2\dg
+（停等時輸出減 IMU 姿態：\code{zb0} $+5.0$\dg$\to$\code{bt1} $+3.8$\dg）。再配合
+$\sigma_{\text{yaw}}=4$ 與較強的軌跡線量測（\code{p5}），public 區段（第 157--1257 幀）輸出減 IMU 姿態的平均偏差由
+\code{bt1} 的 $+2.09$\dg 降到 $+1.34$\dg。
+
+\textbf{未解}：左右不平衡降權（\code{SideBalance}）與依左右選用 yaw 量測，效果正負參半，皆不採用。
+殘餘的根因本身沒有消除，只是被軌跡線量測壓低。
+
+\subsection{嘗試後捨棄的方向}
+\begin{table}[H]
+\centering\small
+\caption{失敗或不採用的嘗試}\label{tab:fail}
+\begin{tabularx}{\linewidth}{@{}p{0.27\linewidth}YY@{}}
+\toprule
+嘗試 & 結果 & 結論\\
+\midrule
+G-ICP 取代 NDT & 純追蹤每幀跳 2--3~m，本地 $E$ 93--133 & 不採用\\
+線上尺度估計（fitness 選尺度） & Track1 本地 $E$ 1.73$\to$2.24；尺度吸收了錯位 & 失敗：尺度與平移耦合\\
+yaw 多起點加分散度進 $R$ & 轉彎後更差（yaw 偏差 $+13.7\sim+17.8$\dg） & 失敗\\
+固定前向倍率 \code{ply_aniso_x} 0.95/0.90 & 全長沒有重現單幀診斷的改善 & 不採用\\
+多相機點雲（\code{3cameras_ply}） & Track1 單幀準度與單相機打平、對尺度更敏感；垂直結構少的區域也無優勢 & 不投入\\
+NDT 參數與前處理變體（解析度、距離、粗到細、去地面等） & 沒有任何一類在三個 track 同時提高收斂率與準度 & 準度上限由點雲本身決定\\
+用地圖路面約束位姿 $z$ & 轉彎太晚、轉彎後偏右；fitness 0.253$\to$0.337 & 不採用\\
+軌跡線橫向推（\code{l2}） & Kaggle 1.74$\to$1.84；Track1 發散 & 不採用：軌跡線橫向位置不能當真值\\
+停等也量測軌跡線（\code{b3}） & Kaggle 1.87$\to$1.92（過修約 1.5--1.8\dg） & 不採用\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{目前剩下的問題}
+\begin{itemize}
+  \item Track3 public 1.74 仍高於 public baseline 1.29。誤差預算（推論，Track3 無真值）：位置 RMSE 約 1.2~m，
+        加上 $0.2\times$ yaw RMS（約 2.5\dg）；橫向偏差（0.3--0.5~m）僅貢獻 0.04--0.1，停等位置縱向偏差不超過 0.5~m；
+        剩下的誤差\textbf{很可能}主要在行駛段的縱向（NDT 退化方向）與 yaw。單幀診斷顯示尺度每差 1 單位，
+        縱向最佳位置移動約 1.7~m，可能與尺度耦合，但全長未驗證。
+  \item 轉彎後位姿 $z$ 偏高約 0.5--0.9~m、pitch 鼻朝下，只確認了現象，尚未解決。
+\end{itemize}
+
+%--------------------------------------------------------------------
+\section{Workload Distribution}
+\begin{table}[H]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}llYc@{}}
+\toprule
+成員 & 學號 & 負責項目 & 貢獻比例\\
+\midrule
+王修呈 & a151527 & 初始環境、初版程式、開發方向與研究計畫、實驗結果分析與提出改進方向 & 100\%\\
+Claude & --- & 撰寫程式與執行實驗 & 100\%\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+%--------------------------------------------------------------------
+\section{Others}
+
+\subsection{重現方式}
+細節見 \code{README.md}。以 Track1 為例：
+\begin{lstlisting}[language=bash]
+docker compose up -d && docker exec -it mid1_container bash
+cd /root/midterm
+colcon build --packages-select localization --cmake-args -DCMAKE_BUILD_TYPE=Release
+source install/setup.bash
+ros2 launch localization map_modified.launch.py data_path:=/root/data/Track1 voxel_leaf_size:=1.0
+ros2 launch localization localization.launch.py data_path:=/root/data/Track1 save_file:=Track1_result.txt
+python3 src/localization/processing_codes/txt_to_idx_x_y_yaw.py \
+    src/localization/result/Track1_result.txt src/localization/result/result_1.csv
+\end{lstlisting}
+Track2/3 同理，將 \code{data_path} 換成對應目錄即可；參數檔依目錄名稱自動選用。
+
+\subsection{三份 yaml 的刻意差異}
+\begin{itemize}
+  \item \code{ply_scale}：8.5/8.7/7.5。
+  \item Track1：只搜 yaw 的初始位姿搜尋。
+  \item Track2：關閉第 0 幀搜尋、釘住 $\beta$、$b_a$ 偽量測、\code{yaw_bank_*}、\code{road_heading_*}。
+  \item Track3：開啟 \code{trail_heading_*}。
+  \item Track1/2：開啟 \code{gnss_prior_*}。
+\end{itemize}
+可用 \code{tools/diff_params.py} 檢查三份 yaml 的差異。
+
+\subsection{限制與未做的方向}
+\begin{itemize}
+  \item 尺度為各 track 的固定值；線上估計因與平移耦合而失敗，尚無穩定的尺度估計方法。
+  \item NDT 在這類點雲上的最佳點很平坦（縱向退化、yaw 景觀平），單一參數的調整上限很小。
+  \item 未做的方向：估計 NDT yaw 量測相對軌跡線方向的緩變偏差並從量測中扣除；轉彎段的縱向約束。
+\end{itemize}
+
+\end{document}

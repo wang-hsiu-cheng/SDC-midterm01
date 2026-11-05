@@ -24,7 +24,6 @@
 \setCJKmainfont[AutoFakeBold=2.5]{kaiu.ttf}
 \setCJKsansfont[AutoFakeBold=2.5]{kaiu.ttf}
 
-\graphicspath{{../slides_figs_en/}}
 
 % --- 設定圖片標題文字置中集中，不左右分散 ---
 \captionsetup[figure]{justification=centering}
@@ -125,7 +124,7 @@ Track3 & 0.4 & \code{p5}（軌跡線航向） & public \textbf{1.74}／private \
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{m2_architecture.png}
+\includegraphics[width=\linewidth]{figures/m2_architecture.png}
 \caption{整體管線。同一條管線，各 track 以 yaml 開啟自己的外加模組（虛線＝僅該 track 啟用）。}
 \label{fig:arch}
 \end{figure}
@@ -181,7 +180,7 @@ Track3 在約第 900--2200 幀停紅燈。沒有 ZUPT 時，停等期間位置�
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.92\linewidth]{b2_zupt.png}
+\includegraphics[width=0.92\linewidth]{figures/b2_zupt.png}
 \caption{Track3 紅燈停等（第 948--2179 幀；位移與 yaw 皆相對停等起點）。
 ZUPT 關（灰）時位移與 yaw 持續漂移、零偏被帶走；ZUPT 開（綠）時零偏穩定在靜止窗口估得的 $-0.0041$~rad/s。}
 \label{fig:zupt}
@@ -219,7 +218,7 @@ ZUPT 開（\code{p5}）    & 0.67~m & 1.84~m  & $+0.7$\dg  & $-0.0041$~rad/s\\
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{fig07_trail_heading.png}
+\includegraphics[width=\linewidth]{figures/fig07_trail_heading.png}
 \caption{左：相機高度的地圖點沿建圖車軌跡形成細線（綠線為 \code{p5} 輸出）；
 右：每次量測相對預測的航向修正量（停等時不量測）。}
 \label{fig:trail}
@@ -296,7 +295,7 @@ manifest 的 \code{run_track.sh}/\code{sweep.sh}/\code{docker_run.sh}（每個 r
 \subsection{Track3 的分數演進}
 \begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{fig08_track3_progress.png}
+\includegraphics[width=\linewidth]{figures/fig08_track3_progress.png}
 \caption{Track3 Kaggle public 分數演進。實心為主線採用的版本，空心為支線試驗（\code{ba05}、\code{b3}、\code{p1s4}、\code{l2}）、未採用。}
 \label{fig:t3}
 \end{figure}
